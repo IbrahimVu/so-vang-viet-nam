@@ -1,5 +1,6 @@
 const intervalMs = 60_000;
 const memory = new Map();
+const liveOrigin = 'https://ibrahimvu.github.io';
 
 function securityHeaders(protocol) {
   const headers = new Headers({
@@ -16,16 +17,17 @@ function securityHeaders(protocol) {
   return headers;
 }
 
-async function readSource(source, cache, base, now) {
+async function readSource(source, cache, base, now, env) {
   const key = new Request(new URL('/.price-cache/' + source.id, base));
   let saved = memory.get(source.id);
   if (!saved && cache) {
     try { saved = await (await cache.match(key))?.json(); } catch {}
   }
-  if (saved && now - Date.parse(saved.checkedAt) < intervalMs) return saved;
+  // Reuse results only for overlapping refresh clicks and immediate retries.
+  if (saved && now - Date.parse(saved.checkedAt) < (apiOnly ? 5000 : intervalMs)) return saved;
 
   try {
-    const result = await source.read();
+    const result = await source.read(env);
     if (!result.rows.length) throw new Error('Empty price list');
     const updated = { id: source.id, name: source.name, url: source.url,
       ...result, status: 'ok', checkedAt: new Date().toISOString() };
@@ -36,18 +38,19 @@ async function readSource(source, cache, base, now) {
       } catch {}
     }
     return updated;
-  } catch {
-    console.warn('Không thể đồng bộ nguồn giá', source.id);
+  } catch (error) {
+    const reason = error.sourceReason ?? (error.name === 'TimeoutError' ? 'timeout' : 'bad_response');
+    console.warn('Không thể đồng bộ nguồn giá', source.id, reason);
     return { id: source.id, name: source.name, url: source.url,
-      status: saved ? 'cached' : 'unavailable', checkedAt: saved?.checkedAt ?? null,
+      status: saved ? 'cached' : 'unavailable', reason, checkedAt: saved?.checkedAt ?? null,
       rows: saved?.rows ?? [] };
   }
 }
 
-function prices(base) {
+function prices(base, env) {
   const now = Date.now();
   const cache = globalThis.caches?.default;
-  return Promise.all(sources.map(source => readSource(source, cache, base, now)));
+  return Promise.all(sources.map(source => readSource(source, cache, base, now, env)));
 }
 
 const assets = {
@@ -57,7 +60,7 @@ const assets = {
 };
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const { pathname, protocol } = new URL(request.url);
     const headers = securityHeaders(protocol);
     const head = request.method === 'HEAD';
@@ -66,12 +69,19 @@ export default {
       return new Response('Phương thức không được hỗ trợ', { status: 405, headers });
     }
     if (pathname === '/api/prices') {
+      if (apiOnly) {
+        const origin = request.headers.get('Origin');
+        if (origin && origin !== liveOrigin) return new Response(null, { status: 403, headers });
+        headers.set('Access-Control-Allow-Origin', liveOrigin);
+        headers.set('Vary', 'Origin');
+        headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
+      }
       headers.set('Content-Type', 'application/json; charset=utf-8');
       if (head) return new Response(null, { headers });
-      return Response.json({ sources: await prices(request.url), refreshSeconds: intervalMs / 1000,
+      return Response.json({ sources: await prices(request.url, env), refreshSeconds: intervalMs / 1000,
         checkedAt: new Date().toISOString() }, { headers });
     }
-    if (!Object.hasOwn(assets, pathname)) {
+    if (apiOnly || !Object.hasOwn(assets, pathname)) {
       return new Response(head ? null : 'Không tìm thấy', { status: 404, headers });
     }
     const [body, type] = assets[pathname]();

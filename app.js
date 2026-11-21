@@ -13,6 +13,7 @@ let disconnected = false;
 let snapshotExpired = false;
 const status = $('status');
 const endpoint = status.dataset.endpoint;
+const liveEndpoint = status.dataset.liveEndpoint;
 const usesSnapshot = endpoint === './prices.json';
 let currentPage = 1;
 const pageSize = 24;
@@ -115,26 +116,52 @@ function showSources() {
     link.rel = 'noopener noreferrer';
     link.referrerPolicy = 'no-referrer';
     const labels = { ok: 'Đã đồng bộ', cached: 'Dùng giá đã lưu', unavailable: 'Chưa kết nối' };
-    const detail = source.partial ? 'Đã đồng bộ một phần' : labels[source.status];
+    const reasons = { blocked: 'Nguồn chặn truy cập tự động', timeout: 'Nguồn phản hồi quá chậm',
+      http_error: 'Nguồn không phản hồi thành công', bad_response: 'Chưa đọc được bảng giá' };
+    const detail = source.partial ? 'Đã đồng bộ một phần' :
+      source.status === 'unavailable' && reasons[source.reason] || labels[source.status];
     li.append(link, make('span', detail, 'source-state ' + source.status));
     return li;
   }));
 }
 
-async function refresh() {
+function mergePrices(next, previous, manual) {
+  if (!previous) return next;
+  const sources = next.sources.map(source => {
+    const saved = previous.sources.find(item => item.id === source.id);
+    if (!saved?.rows.length) return source;
+    if (source.status !== 'ok') {
+      if (!manual && saved.status === 'ok' && Date.parse(saved.checkedAt) >= Date.parse(next.checkedAt)) return saved;
+      if (!source.rows.length || Date.parse(saved.checkedAt) > Date.parse(source.checkedAt)) {
+        return { ...source, rows: saved.rows, checkedAt: saved.checkedAt, status: 'cached' };
+      }
+    }
+    if (Date.parse(saved.checkedAt) > Date.parse(source.checkedAt)) return saved;
+    return source;
+  });
+  const checkedAt = Date.parse(previous.checkedAt) > Date.parse(next.checkedAt) ? previous.checkedAt : next.checkedAt;
+  return { ...next, checkedAt, sources };
+}
+
+async function refresh(manual = false) {
   if (busy) return;
   busy = true;
   $('refresh').disabled = true;
+  if (manual && liveEndpoint) status.textContent = 'Đang yêu cầu giá mới từ các nguồn…';
   try {
-    const response = await fetch(endpoint, { signal: AbortSignal.timeout(20_000), cache: 'no-store' });
+    const response = await fetch(manual && liveEndpoint ? liveEndpoint : endpoint, {
+      signal: AbortSignal.timeout(25_000), cache: 'no-store', credentials: manual && liveEndpoint ? 'omit' : 'same-origin'
+    });
     if (!response.ok) throw new Error('HTTP ' + response.status);
-    data = await response.json();
+    const next = await response.json();
+    data = mergePrices(next, data, manual);
     disconnected = false;
     const active = data.sources.filter(source => source.status === 'ok').length;
     snapshotExpired = usesSnapshot && Date.now() - Date.parse(data.checkedAt) > 15 * 60_000;
     status.dataset.live = String(active > 0 && !snapshotExpired);
     if (usesSnapshot) {
-      status.textContent = (snapshotExpired ? 'Giá đã lưu · ' : active + '/' + data.sources.length + ' nguồn · ') +
+      const online = manual && liveEndpoint ? next.sources.filter(source => source.status === 'ok').length : active;
+      status.textContent = (snapshotExpired ? 'Giá đã lưu · ' : online + '/' + data.sources.length + ' nguồn · ') +
         'Lần lấy giá ' + sourceTime.format(new Date(data.checkedAt));
     } else {
       status.textContent = active + '/' + data.sources.length + ' nguồn đã đồng bộ · Kiểm tra lúc ' +
@@ -148,7 +175,8 @@ async function refresh() {
   } catch {
     disconnected = true;
     $('status').dataset.live = 'false';
-    $('status').textContent = data ? 'Mất kết nối · Đang hiển thị giá đã lưu' : 'Chưa kết nối được bảng giá';
+    $('status').textContent = data && manual && liveEndpoint ? 'Chưa lấy được giá mới · Đang giữ bảng giá đã tải' :
+      data ? 'Mất kết nối · Đang hiển thị giá đã lưu' : 'Chưa kết nối được bảng giá';
     if (data) render();
     else prices.querySelector('td').textContent = 'Không tải được giá. Chọn Làm mới để thử lại.';
   } finally {
@@ -170,7 +198,7 @@ for (const control of [brand, region]) control.addEventListener('change', () => 
 unit.addEventListener('change', render);
 $('previous').addEventListener('click', () => { currentPage -= 1; render(); });
 $('next').addEventListener('click', () => { currentPage += 1; render(); });
-$('refresh').addEventListener('click', refresh);
+$('refresh').addEventListener('click', () => refresh(true));
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 setInterval(() => { if (!document.hidden) refresh(); }, 60_000);
 refresh();

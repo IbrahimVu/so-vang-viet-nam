@@ -9,13 +9,15 @@ const btmcUrl = 'https://btmc.vn/gia-vang-theo-ngay.html';
 
 async function fetchFeed(url) {
   const response = await fetch(url, {
-    headers: { Accept: 'application/json, text/html;q=0.9, application/xml;q=0.8' },
+    headers: { Accept: 'application/json, text/html;q=0.9, application/xml;q=0.8', 'Cache-Control': 'no-cache' },
     redirect: 'manual',
     signal: AbortSignal.timeout(8500)
   });
   if (!response.ok || !response.body || Number(response.headers.get('Content-Length')) > maxFeedBytes) {
     await response.body?.cancel();
-    throw new Error('Source response rejected');
+    const error = new Error('Source response rejected');
+    error.sourceReason = response.status === 403 ? 'blocked' : !response.ok ? 'http_error' : 'bad_response';
+    throw error;
   }
 
   const reader = response.body.getReader();
@@ -115,7 +117,7 @@ async function phuQuy() {
   return { rows };
 }
 
-async function btmc() {
+async function btmcDaily() {
   const html = await fetchFeed(btmcUrl);
   const dateControl = html.match(/<input\b[^>]*\bid="datepicker11"[^>]*>/i)?.[0] ?? '';
   const date = dateControl.match(/\bvalue="(\d{2}\/\d{2}\/\d{4})"/i)?.[1];
@@ -130,6 +132,26 @@ async function btmc() {
     return quote(name, buy, sell, 1000, 'Hà Nội', null);
   }).filter(Boolean);
   return { rows };
+}
+
+async function btmc(env) {
+  if (env?.BTMC_API_KEY) {
+    try {
+      const endpoint = new URL('https://api.btmc.vn/api/BTMCAPI/getpricebtmc');
+      endpoint.searchParams.set('key', env.BTMC_API_KEY);
+      const payload = JSON.parse(await fetchFeed(endpoint));
+      const rows = payload.DataList.Data.map(item => {
+        const id = item['@row'];
+        const name = item['@n_' + id];
+        if (typeof name !== 'string' || !/^(vàng|nhẫn|quà mừng|trang sức vàng|bản vàng)/i.test(name)) return null;
+        return quote(name, item['@pb_' + id], item['@ps_' + id], 1, 'Hà Nội', quoteTime(item['@d_' + id]));
+      }).filter(Boolean);
+      if (rows.length) return { rows };
+    } catch {
+      // Try BTMC's public daily board if its official API is temporarily unavailable.
+    }
+  }
+  return btmcDaily();
 }
 
 async function miHong() {
@@ -164,8 +186,14 @@ async function sjc() {
   const perLuong = /(?:1[.,]000|nghin)\s*(?:vnd|dong|d)\s*\/\s*luong/.test(title);
   const perChi = /(?:1[.,]000|nghin)\s*(?:vnd|dong|d)\s*\/\s*chi/.test(title);
   if (perLuong === perChi) throw new Error('Unknown SJC unit');
-  return { rows: tableRows(table[1]).map(([, name, buy, sell]) =>
-    quote(name, buy, sell, perLuong ? 100 : 1000, 'Bảng giá SJC', time)).filter(Boolean) };
+  return { rows: tableRows(table[1]).map(([, label, buy, sell]) => {
+    if (!label) return null;
+    // The official board may append a signed price change after the quoted price.
+    const amount = value => value?.match(/^\s*(\d[\d.,]*)(?:\s*[+-]\s*[\d.,]+)?\s*$/)?.[1];
+    const isProduct = /vang|nhan|nu trang/i.test(ascii(label));
+    return quote(isProduct ? label : 'Vàng miếng SJC', amount(buy), amount(sell), perLuong ? 100 : 1000,
+      isProduct ? 'Bảng giá SJC' : label, time);
+  }).filter(Boolean) };
 }
 
 async function doji() {

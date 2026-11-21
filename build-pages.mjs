@@ -2,20 +2,51 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import './build.mjs';
 
 const { default: worker } = await import('./dist/server/index.js');
-const response = await worker.fetch(new Request('https://localhost/api/prices'));
+const liveOrigin = process.env.LIVE_PRICE_API_ORIGIN?.trim();
+const liveEndpoint = liveOrigin && new URL('/api/prices', liveOrigin).href;
+const btmcDocs = 'https://btmc.vn/thong-tin/tai-lieu-api/api-gia-vang-17784.html';
+let btmcKey = process.env.BTMC_API_KEY;
+if (!btmcKey) {
+  try {
+    const docs = await fetch(btmcDocs, { redirect: 'error', signal: AbortSignal.timeout(6000) });
+    if (docs.ok) btmcKey = (await docs.text()).match(/getpricebtmc\?key=([a-z0-9]{20,60})/i)?.[1];
+  } catch {
+    // The worker can still try BTMC's timestamped daily table.
+  }
+}
+const response = await worker.fetch(new Request('https://localhost/api/prices'), { BTMC_API_KEY: btmcKey });
 const snapshot = await response.json();
+if (liveEndpoint && snapshot.sources.some(source => source.status !== 'ok')) {
+  try {
+    const response = await fetch(liveEndpoint, { signal: AbortSignal.timeout(12_000) });
+    if (response.ok) {
+      const supplemental = await response.json();
+      snapshot.sources = snapshot.sources.map(source => source.status === 'ok' ? source :
+        supplemental.sources.find(item => item.id === source.id && item.status === 'ok' && item.rows.length) ?? source);
+    }
+  } catch {
+    // The scheduled build can still publish quotes fetched directly.
+  }
+}
 if (!snapshot.sources.some(source => source.status === 'ok' && source.rows.length > 0)) {
   throw new Error('Không lấy được giá từ nguồn nào. Giữ bản Pages đã xuất bản trước đó.');
 }
 
-const policy = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'";
+const connect = liveEndpoint ? ' ' + new URL(liveEndpoint).origin : '';
+const policy = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'" +
+  connect + "; base-uri 'none'; form-action 'none'";
+const endpointAttributes = 'data-endpoint="./prices.json"' +
+  (liveEndpoint ? ' data-live-endpoint="' + liveEndpoint + '"' : '');
+const syncDescription = liveEndpoint ?
+  'Bảng giá được lấy tự động theo lịch 5 phút. Chọn Làm mới để yêu cầu lấy giá ngay từ các nguồn.' :
+  'GitHub Actions lấy giá theo lịch 5 phút. Trang kiểm tra bản giá đã xuất bản mỗi 60 giây khi đang mở.';
 const html = (await readFile('index.html', 'utf8'))
   .replace('<meta charset="utf-8">', '<meta charset="utf-8">\n  <meta name="referrer" content="no-referrer">\n  <meta http-equiv="Content-Security-Policy" content="' + policy + '">')
   .replace('href="/style.css"', 'href="./style.css"')
   .replace('src="/app.js"', 'src="./app.js"')
   .replace('href="/"', 'href="./"')
-  .replace('data-endpoint="/api/prices"', 'data-endpoint="./prices.json"')
-  .replace('Trang kiểm tra bảng giá mỗi 60 giây khi đang mở.', 'GitHub Actions được lên lịch lấy giá mỗi 5 phút và có thể chạy trễ. Trang kiểm tra bản giá mới mỗi 60 giây khi đang mở.');
+  .replace('data-endpoint="/api/prices"', endpointAttributes)
+  .replace('Trang kiểm tra bảng giá mỗi 60 giây khi đang mở.', syncDescription);
 
 await mkdir('dist/pages', { recursive: true });
 await Promise.all([
