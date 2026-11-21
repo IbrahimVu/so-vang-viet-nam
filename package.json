@@ -1,0 +1,10 @@
+{
+  "name": "so-vang-viet-nam",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:pages": "node build-pages.mjs",
+    "start": "node --use-system-ca preview.mjs"
+  }
+}

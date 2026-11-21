@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#122b23">
+  <meta name="description" content="Theo dõi và so sánh giá mua vào, bán ra của các thương hiệu vàng lớn tại Việt Nam.">
+  <title>Sổ Vàng · Giá vàng Việt Nam</title>
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="/app.js"></script>
+</head>
+<body>
+  <header class="top"><div class="wrap top-inner">
+    <a class="brand" href="/" aria-label="Sổ Vàng, trang chủ"><span class="mark" aria-hidden="true"><i></i></span>Sổ Vàng<span class="country">VIỆT NAM</span></a>
+    <nav aria-label="Điều hướng"><a href="#bang-gia">Bảng giá</a><a href="#nguon">Nguồn dữ liệu</a></nav>
+    <span class="timezone">Giờ Việt Nam · GMT+7</span>
+  </div></header>
+  <main class="wrap">
+    <section class="hero" aria-labelledby="title">
+      <div class="hero-body">
+        <p class="eyebrow"><span></span> THỊ TRƯỜNG TRONG NƯỚC</p>
+        <h1 id="title">Giá vàng Việt Nam<span>.</span></h1>
+        <p>So sánh giá mua vào và bán ra từ các thương hiệu vàng trên cả nước.</p>
+        <div class="hero-status" role="status" id="status" data-endpoint="/api/prices">Đang tải dữ liệu niêm yết…</div>
+      </div>
+      <div class="ornament" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    </section>
+
+    <section class="overview" aria-label="Tóm tắt giá vàng miếng SJC">
+      <article><span class="metric-icon">↗</span><div><h2>Mua vào cao nhất</h2><strong id="high-buy">—</strong><small id="high-brand">Vàng miếng SJC</small></div></article>
+      <article><span class="metric-icon">↘</span><div><h2>Bán ra thấp nhất</h2><strong id="low-sell">—</strong><small id="low-brand">Vàng miếng SJC</small></div></article>
+      <article><span class="metric-icon">⇄</span><div><h2>Chênh lệch thấp nhất</h2><strong id="low-spread">—</strong><small id="spread-brand">Vàng miếng SJC</small></div></article>
+    </section>
+
+    <section id="bang-gia" class="quotes" aria-labelledby="table-title">
+      <div class="section-head"><div><h2 id="table-title">Bảng giá niêm yết</h2><p id="row-count">Đang tải bảng giá…</p></div><button id="refresh" type="button">⟳ <span>Làm mới</span></button></div>
+      <div class="filters">
+        <div class="tabs" aria-label="Loại vàng">
+          <button data-kind="all" type="button" aria-pressed="true">Tất cả</button>
+          <button data-kind="bar" type="button" aria-pressed="false">Vàng miếng</button>
+          <button data-kind="ring" type="button" aria-pressed="false">Vàng nhẫn</button>
+          <button data-kind="other" type="button" aria-pressed="false">Loại khác</button>
+        </div>
+        <label><span>Thương hiệu</span><select id="brand-filter"><option value="all">Tất cả thương hiệu</option></select></label>
+        <label><span>Khu vực</span><select id="region"><option value="all">Tất cả khu vực</option></select></label>
+        <label><span>Đơn vị</span><select id="unit"><option value="luong">đ / lượng</option><option value="chi">đ / chỉ</option></select></label>
+      </div>
+      <div class="table-scroll" tabindex="0" aria-label="Cuộn bảng giá">
+        <table>
+          <thead><tr><th scope="col">Thương hiệu / Sản phẩm</th><th scope="col">Khu vực</th><th scope="col" class="num">Mua vào</th><th scope="col" class="num">Bán ra</th><th scope="col" class="num">Chênh lệch</th><th scope="col">Giờ niêm yết</th></tr></thead>
+          <tbody id="prices"><tr><td colspan="6" class="empty">Đang tải giá từ các nguồn niêm yết…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="pages" id="pagination" hidden>
+        <button id="previous" type="button">Trang trước</button>
+        <span id="page-number" aria-live="polite"></span>
+        <button id="next" type="button">Trang sau</button>
+      </div>
+      <p class="table-note">Mua vào và bán ra được tính theo góc nhìn của cửa hàng. 1 lượng = 10 chỉ.</p>
+    </section>
+
+    <section id="nguon" class="sources" aria-labelledby="source-title">
+      <div class="section-head"><div><h2 id="source-title">Nguồn dữ liệu</h2><p>Trang kiểm tra bảng giá mỗi 60 giây khi đang mở. Giờ niêm yết do từng nguồn công bố.</p></div></div>
+      <ul id="source-list"></ul>
+    </section>
+  </main>
+  <footer><div class="wrap"><span>Sổ Vàng Việt Nam</span><a href="#title">Về đầu trang</a></div></footer>
+</body>
+</html>

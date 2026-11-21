@@ -1,0 +1,168 @@
+const $ = id => document.getElementById(id);
+const format = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 });
+const localTime = new Intl.DateTimeFormat('vi-VN', {
+  timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', second: '2-digit'
+});
+const sourceTime = new Intl.DateTimeFormat('vi-VN', {
+  timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric'
+});
+let data;
+let kind = 'all';
+let busy = false;
+let disconnected = false;
+let snapshotExpired = false;
+const status = $('status');
+const endpoint = status.dataset.endpoint;
+const usesSnapshot = endpoint === './prices.json';
+let currentPage = 1;
+const pageSize = 24;
+const unit = $('unit');
+const region = $('region');
+const brand = $('brand-filter');
+const prices = $('prices');
+const pills = Array.from(document.querySelectorAll('[data-kind]'));
+
+function make(tag, value, cls) {
+  const el = document.createElement(tag);
+  if (value != null) el.textContent = value;
+  if (cls) el.className = cls;
+  return el;
+}
+
+function money(value) {
+  return value == null ? '—' : format.format(value * (unit.value === 'chi' ? 1 : 10));
+}
+
+function options(select, values) {
+  const current = select.value;
+  select.querySelectorAll('option:not(:first-child)').forEach(option => option.remove());
+  for (const [key, label] of values) select.add(new Option(label, key));
+  if (Array.from(select.options).some(option => option.value === current)) select.value = current;
+}
+
+function renderRows(rows) {
+  $('row-count').textContent = rows.length + ' niêm yết · ' + (unit.value === 'chi' ? 'đồng/chỉ' : 'đồng/lượng');
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+  currentPage = Math.min(currentPage, pageCount);
+  $('pagination').hidden = pageCount === 1;
+  $('previous').disabled = currentPage === 1;
+  $('next').disabled = currentPage === pageCount;
+  $('page-number').textContent = currentPage + ' / ' + pageCount;
+  if (!rows.length) {
+    const cell = make('td', 'Không có giá niêm yết phù hợp với bộ lọc.', 'empty');
+    cell.colSpan = 6;
+    const tr = make('tr');
+    tr.append(cell);
+    prices.replaceChildren(tr);
+    return;
+  }
+  const offset = (currentPage - 1) * pageSize;
+  prices.replaceChildren(...rows.slice(offset, offset + pageSize).map(row => {
+    const tr = make('tr');
+    const item = make('td');
+    item.append(make('span', row.name, 'product'), make('span', row.brand, 'meta'));
+    const expired = row.cached || disconnected || snapshotExpired || row.time && Date.now() - Date.parse(row.time) > 86_400_000;
+    const timing = make('td', row.time ? sourceTime.format(new Date(row.time)) : '—', 'timing');
+    if (expired) timing.append(make('div', row.cached || disconnected || snapshotExpired ? 'Giá đã lưu' : 'Quá 24 giờ', 'meta stale'));
+    tr.append(item, make('td', row.region), make('td', money(row.buy), 'num buy'),
+      make('td', money(row.sell), 'num sell'), make('td', money(row.spread), 'num'), timing);
+    return tr;
+  }));
+}
+
+function renderSummary(rows) {
+  const eligible = rows.filter(row => row.reference && !row.cached && !disconnected && !snapshotExpired &&
+    (!row.time || Date.now() - Date.parse(row.time) <= 86_400_000) && row.buy != null && row.sell != null);
+  const metrics = [
+    ['high-buy', 'high-brand', 'buy', -1],
+    ['low-sell', 'low-brand', 'sell', 1],
+    ['low-spread', 'spread-brand', 'spread', 1]
+  ];
+  for (const [id, label, field, order] of metrics) {
+    const best = eligible.reduce((current, row) => !current || order * (row[field] - current[field]) < 0 ? row : current, null);
+    $(id).textContent = best ? money(best[field]) + ' đ' : '—';
+    $(label).textContent = best ? 'Miếng SJC · ' + best.brand + ' · ' + best.region : 'Vàng miếng SJC';
+  }
+}
+
+function render() {
+  if (!data) return;
+  const allRows = data.sources.flatMap(source => source.rows.map(row => ({
+    ...row, brand: source.name, brandId: source.id, cached: source.status === 'cached',
+    spread: row.sell == null || row.buy == null ? null : row.sell - row.buy
+  })));
+  const areaRows = allRows.filter(row => region.value === 'all' || row.region === region.value)
+    .sort((a, b) => Number(b.reference) - Number(a.reference) || a.brand.localeCompare(b.brand, 'vi'));
+  renderSummary(areaRows.filter(row => brand.value === 'all' || row.brandId === brand.value));
+  renderRows(areaRows.filter(row => (kind === 'all' || row.kind === kind) &&
+    (brand.value === 'all' || row.brandId === brand.value)));
+}
+
+function showSources() {
+  $('source-list').replaceChildren(...data.sources.map(source => {
+    const li = make('li');
+    const link = make('a', source.name);
+    link.href = source.url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.referrerPolicy = 'no-referrer';
+    const labels = { ok: 'Đã đồng bộ', cached: 'Dùng giá đã lưu', unavailable: 'Chưa kết nối' };
+    const detail = source.partial ? 'Đã đồng bộ một phần' : labels[source.status];
+    li.append(link, make('span', detail, 'source-state ' + source.status));
+    return li;
+  }));
+}
+
+async function refresh() {
+  if (busy) return;
+  busy = true;
+  $('refresh').disabled = true;
+  try {
+    const response = await fetch(endpoint, { signal: AbortSignal.timeout(20_000), cache: 'no-store' });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    data = await response.json();
+    disconnected = false;
+    const active = data.sources.filter(source => source.status === 'ok').length;
+    snapshotExpired = usesSnapshot && Date.now() - Date.parse(data.checkedAt) > 15 * 60_000;
+    status.dataset.live = String(active > 0 && !snapshotExpired);
+    if (usesSnapshot) {
+      status.textContent = (snapshotExpired ? 'Giá đã lưu · ' : active + '/' + data.sources.length + ' nguồn · ') +
+        'Lần lấy giá ' + sourceTime.format(new Date(data.checkedAt));
+    } else {
+      status.textContent = active + '/' + data.sources.length + ' nguồn đã đồng bộ · Kiểm tra lúc ' +
+        localTime.format(new Date(data.checkedAt));
+    }
+    options(brand, data.sources.map(source => [source.id, source.name]));
+    const regions = Array.from(new Set(data.sources.flatMap(source => source.rows.map(row => row.region))));
+    options(region, regions.sort((a, b) => a.localeCompare(b, 'vi')).map(value => [value, value]));
+    showSources();
+    render();
+  } catch {
+    disconnected = true;
+    $('status').dataset.live = 'false';
+    $('status').textContent = data ? 'Mất kết nối · Đang hiển thị giá đã lưu' : 'Chưa kết nối được bảng giá';
+    if (data) render();
+    else prices.querySelector('td').textContent = 'Không tải được giá. Chọn Làm mới để thử lại.';
+  } finally {
+    busy = false;
+    $('refresh').disabled = false;
+  }
+}
+
+pills.forEach(button => button.addEventListener('click', () => {
+  kind = button.dataset.kind;
+  currentPage = 1;
+  pills.forEach(pill => pill.setAttribute('aria-pressed', String(pill === button)));
+  render();
+}));
+for (const control of [brand, region]) control.addEventListener('change', () => {
+  currentPage = 1;
+  render();
+});
+unit.addEventListener('change', render);
+$('previous').addEventListener('click', () => { currentPage -= 1; render(); });
+$('next').addEventListener('click', () => { currentPage += 1; render(); });
+$('refresh').addEventListener('click', refresh);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+setInterval(() => { if (!document.hidden) refresh(); }, 60_000);
+refresh();
