@@ -25,10 +25,16 @@ const pills = Array.from(document.querySelectorAll('[data-kind]'));
 const brandPriority = new Map([['sjc', 0], ['doji', 1], ['btmh', 2], ['btmc', 3]]);
 const northernRegions = new Set(['Hà Nội', 'Miền Bắc']);
 
+function quoteGroup(row) {
+  const preferred = brandPriority.has(row.brandId);
+  if (northernRegions.has(row.region)) return preferred ? 0 : 2;
+  return preferred ? 1 : 3;
+}
+
 function compareQuotes(a, b) {
-  const regionPriority = Number(northernRegions.has(b.region)) - Number(northernRegions.has(a.region));
+  const groupDifference = quoteGroup(a) - quoteGroup(b);
   const priority = (brandPriority.get(a.brandId) ?? 4) - (brandPriority.get(b.brandId) ?? 4);
-  return regionPriority || priority || Number(b.reference) - Number(a.reference) || a.brand.localeCompare(b.brand, 'vi');
+  return groupDifference || priority || Number(b.reference) - Number(a.reference) || a.brand.localeCompare(b.brand, 'vi');
 }
 
 function make(tag, value, cls) {
@@ -158,8 +164,12 @@ async function refresh(manual = false) {
     disconnected = false;
     const active = data.sources.filter(source => source.status === 'ok').length;
     snapshotExpired = usesSnapshot && Date.now() - Date.parse(data.checkedAt) > 15 * 60_000;
-    status.dataset.live = String(active > 0 && !snapshotExpired);
-    if (usesSnapshot) {
+    const pausedUntil = Date.parse(data.scan?.pausedUntil);
+    const paused = pausedUntil > Date.now();
+    status.dataset.live = String(active > 0 && !snapshotExpired && !paused);
+    if (paused) {
+      status.textContent = 'Tạm dừng quét · Quét lại lúc ' + sourceTime.format(new Date(pausedUntil));
+    } else if (usesSnapshot) {
       const online = manual && liveEndpoint ? next.sources.filter(source => source.status === 'ok').length : active;
       status.textContent = (snapshotExpired ? 'Giá đã lưu · ' : online + '/' + data.sources.length + ' nguồn · ') +
         'Lần lấy giá ' + sourceTime.format(new Date(data.checkedAt));
