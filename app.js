@@ -22,10 +22,12 @@ const brand = $('brand-filter');
 const prices = $('prices');
 const pills = Array.from(document.querySelectorAll('[data-kind]'));
 const brandPriority = new Map([['sjc', 0], ['doji', 1], ['btmh', 2], ['btmc', 3]]);
+const northernRegions = new Set(['Hà Nội', 'Miền Bắc']);
 
 function compareQuotes(a, b) {
+  const regionPriority = Number(northernRegions.has(b.region)) - Number(northernRegions.has(a.region));
   const priority = (brandPriority.get(a.brandId) ?? 4) - (brandPriority.get(b.brandId) ?? 4);
-  return priority || Number(b.reference) - Number(a.reference) || a.brand.localeCompare(b.brand, 'vi');
+  return regionPriority || priority || Number(b.reference) - Number(a.reference) || a.brand.localeCompare(b.brand, 'vi');
 }
 
 function make(tag, value, cls) {
