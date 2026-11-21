@@ -1,16 +1,26 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import './build.mjs';
-import { readScanState, recordScan, scanIsPaused, scanWindowIsOpen, workflowOutput } from './scan-state.mjs';
 
 const { default: worker } = await import('./dist/server/index.js');
 const liveOrigin = process.env.LIVE_PRICE_API_ORIGIN?.trim();
 const liveEndpoint = liveOrigin && new URL('/api/prices', liveOrigin).href;
 const onGitHub = process.env.GITHUB_ACTIONS === 'true';
 const isScheduled = process.env.GITHUB_EVENT_NAME === 'schedule';
-const previous = onGitHub ? (await readScanState())?.state : null;
-const paused = scanIsPaused(previous);
-if (isScheduled && (paused || !scanWindowIsOpen())) {
-  console.log(paused ? 'Tạm dừng quét đến ' + previous.pausedUntil : 'Ngoài khung giờ quét 08:30–20:30');
+
+function scanWindowIsOpen() {
+  const vietnamTime = new Date(Date.now() + 7 * 60 * 60_000);
+  const minuteOfDay = vietnamTime.getUTCHours() * 60 + vietnamTime.getUTCMinutes();
+  return minuteOfDay >= 8 * 60 + 30 && minuteOfDay <= 20 * 60 + 30;
+}
+
+async function workflowOutput(publish) {
+  if (process.env.GITHUB_OUTPUT) {
+    await appendFile(process.env.GITHUB_OUTPUT, 'publish=' + publish + '\n');
+  }
+}
+
+if (isScheduled && !scanWindowIsOpen()) {
+  console.log('Ngoài khung giờ quét 08:30–20:30');
   await workflowOutput(false);
   process.exit(0);
 }
@@ -55,8 +65,7 @@ async function publishedSnapshot() {
 }
 
 const snapshot = onGitHub && !isScheduled ? await publishedSnapshot() : await fetchSnapshot();
-const next = isScheduled ? recordScan(previous, snapshot) : null;
-snapshot.scan = { pausedUntil: next ? next.pausedUntil : paused ? previous.pausedUntil : null };
+delete snapshot.scan;
 
 const connect = liveEndpoint ? ' ' + new URL(liveEndpoint).origin : '';
 const policy = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'" +
@@ -64,8 +73,8 @@ const policy = "default-src 'none'; script-src 'self'; style-src 'self'; img-src
 const endpointAttributes = 'data-endpoint="./prices.json"' +
   (liveEndpoint ? ' data-live-endpoint="' + liveEndpoint + '"' : '');
 const syncDescription = liveEndpoint ?
-  'Quét mỗi 5 phút từ 08:30 đến 20:30 giờ Việt Nam. Sau 20 lần liên tiếp giá không đổi, quét lại từ 08:30. Chọn Làm mới để lấy giá theo yêu cầu.' :
-  'Quét mỗi 5 phút từ 08:30 đến 20:30 giờ Việt Nam. Sau 20 lần liên tiếp giá không đổi, tạm dừng đến 08:30 tiếp theo.';
+  'Quét mỗi 5 phút từ 08:30 đến 20:30 giờ Việt Nam. Chọn Làm mới để lấy giá theo yêu cầu.' :
+  'Quét mỗi 5 phút từ 08:30 đến 20:30 giờ Việt Nam.';
 const html = (await readFile('index.html', 'utf8'))
   .replace('<meta charset="utf-8">', '<meta charset="utf-8">\n  <meta name="referrer" content="no-referrer">\n  <meta http-equiv="Content-Security-Policy" content="' + policy + '">')
   .replace('href="/style.css"', 'href="./style.css"')
@@ -82,5 +91,4 @@ await Promise.all([
   writeFile('dist/pages/prices.json', JSON.stringify(snapshot))
 ]);
 console.log('Nguồn đã đồng bộ:', snapshot.sources.filter(source => source.status === 'ok').length);
-if (next) console.log('Số lần quét giá không đổi:', next.unchanged, 'Mở lại:', next.pausedUntil ?? 'Đang quét');
-await workflowOutput(true, next);
+await workflowOutput(true);

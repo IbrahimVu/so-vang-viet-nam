@@ -172,12 +172,8 @@ async function refresh(manual = false) {
     disconnected = false;
     const active = data.sources.filter(source => source.status === 'ok').length;
     snapshotExpired = usesSnapshot && Date.now() - Date.parse(data.checkedAt) > 15 * 60_000;
-    const pausedUntil = Date.parse(data.scan?.pausedUntil);
-    const paused = pausedUntil > Date.now();
-    status.dataset.live = String(active > 0 && !snapshotExpired && !paused);
-    if (paused) {
-      status.textContent = 'Tạm dừng quét · Quét lại lúc ' + sourceTime.format(new Date(pausedUntil));
-    } else if (usesSnapshot) {
+    status.dataset.live = String(active > 0 && !snapshotExpired);
+    if (usesSnapshot) {
       const online = manual && liveEndpoint ? next.sources.filter(source => source.status === 'ok').length : active;
       status.textContent = (snapshotExpired ? 'Giá đã lưu · ' : online + '/' + data.sources.length + ' nguồn · ') +
         'Lần lấy giá ' + sourceTime.format(new Date(data.checkedAt));
