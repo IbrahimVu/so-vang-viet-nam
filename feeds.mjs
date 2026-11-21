@@ -4,6 +4,8 @@ const zones = [
 ];
 
 const maxFeedBytes = 2 * 1024 * 1024;
+const sjcUrl = 'https://sjc.com.vn/bieu-do-gia-vang';
+const btmcUrl = 'https://btmc.vn/gia-vang-theo-ngay.html';
 
 async function fetchFeed(url) {
   const response = await fetch(url, {
@@ -114,15 +116,18 @@ async function phuQuy() {
 }
 
 async function btmc() {
-  const html = await fetchFeed('https://btmc.vn/');
-  const label = plain(html).match(/Cập nhật lúc.{1,65}ĐVT 1 = 1\.000 VNĐ/i)?.[0];
-  const time = quoteTime(label);
-  if (!/ĐVT 1 = 1\.000 VNĐ/i.test(label ?? '')) throw new Error('Unknown BTMC unit');
+  const html = await fetchFeed(btmcUrl);
+  const dateControl = html.match(/<input\b[^>]*\bid="datepicker11"[^>]*>/i)?.[0] ?? '';
+  const date = dateControl.match(/\bvalue="(\d{2}\/\d{2}\/\d{4})"/i)?.[1];
+  const today = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Ho_Chi_Minh' }).format();
+  if (date !== today || !/ĐVT 1 = 1\.000 VNĐ/i.test(plain(html))) {
+    throw new Error('BTMC daily date or unit could not be verified');
+  }
   const table = html.split('(buy)')[1]?.split('</table>')[0] ?? '';
   const rows = tableRows(table).map(cells => {
-    const [name, , buy, sell] = cells.length === 5 ? cells.slice(1) : cells;
-    if (!name || !/^(vàng|nhẫn|quà mừng)/i.test(name)) return null;
-    return quote(name, buy, sell, 1000, 'Hà Nội', time);
+    const [name, , buy, sell] = cells.slice(-5, -1);
+    if (!name || !/^(vàng|nhẫn|quà mừng|trang sức vàng)/i.test(name)) return null;
+    return quote(name, buy, sell, 1000, 'Hà Nội', null);
   }).filter(Boolean);
   return { rows };
 }
@@ -150,7 +155,7 @@ async function btmh() {
 }
 
 async function sjc() {
-  const html = await fetchFeed('https://www.sjc.com.vn/bieu-do-gia-vang');
+  const html = await fetchFeed(sjcUrl);
   const time = quoteTime(plain(html).match(/(?:cập nhật|thời điểm)[\s\S]{0,80}/i)?.[0]);
   const table = [...html.matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/gi)]
     .find(([, value]) => /nghin dong\s*\/\s*luong.*mua.*ban/.test(ascii(plain(value))));
@@ -186,12 +191,12 @@ async function ngocTham() {
 }
 
 const sources = [
-  { id: 'sjc', name: 'SJC', url: 'https://www.sjc.com.vn/bieu-do-gia-vang', read: sjc },
+  { id: 'sjc', name: 'SJC', url: sjcUrl, read: sjc },
   { id: 'doji', name: 'DOJI', url: 'https://banggia.doji.vn/', read: doji },
   { id: 'pnj', name: 'PNJ', url: 'https://www.pnj.com.vn/site/gia-vang', read: pnj },
-  { id: 'btmc', name: 'Bảo Tín Minh Châu', url: 'https://btmc.vn/', read: btmc },
+  { id: 'btmc', name: 'Bảo Tín Minh Châu', url: btmcUrl, read: btmc },
   { id: 'phu-quy', name: 'Phú Quý', url: 'https://phuquygroup.vn/', read: phuQuy },
-  { id: 'mi-hong', name: 'Mi Hồng', url: 'https://mihong.vn/vi/gia-vang-trong-nuoc', read: miHong },
+  { id: 'mi-hong', name: 'Mi Hồng', url: 'https://mihong.vn/gia-vang-trong-nuoc', read: miHong },
   { id: 'btmh', name: 'Bảo Tín Mạnh Hải', url: 'https://baotinmanhhai.vn/bang-gia-vang', read: btmh },
   { id: 'ngoc-tham', name: 'Ngọc Thẩm', url: 'https://ngoctham.com/bang-gia-vang/', read: ngocTham }
 ];

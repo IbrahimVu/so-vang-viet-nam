@@ -21,6 +21,12 @@ const region = $('region');
 const brand = $('brand-filter');
 const prices = $('prices');
 const pills = Array.from(document.querySelectorAll('[data-kind]'));
+const brandPriority = new Map([['sjc', 0], ['doji', 1], ['btmh', 2], ['btmc', 3]]);
+
+function compareQuotes(a, b) {
+  const priority = (brandPriority.get(a.brandId) ?? 4) - (brandPriority.get(b.brandId) ?? 4);
+  return priority || Number(b.reference) - Number(a.reference) || a.brand.localeCompare(b.brand, 'vi');
+}
 
 function make(tag, value, cls) {
   const el = document.createElement(tag);
@@ -92,7 +98,7 @@ function render() {
     spread: row.sell == null || row.buy == null ? null : row.sell - row.buy
   })));
   const areaRows = allRows.filter(row => region.value === 'all' || row.region === region.value)
-    .sort((a, b) => Number(b.reference) - Number(a.reference) || a.brand.localeCompare(b.brand, 'vi'));
+    .sort(compareQuotes);
   renderSummary(areaRows.filter(row => brand.value === 'all' || row.brandId === brand.value));
   renderRows(areaRows.filter(row => (kind === 'all' || row.kind === kind) &&
     (brand.value === 'all' || row.brandId === brand.value)));
