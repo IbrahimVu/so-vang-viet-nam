@@ -37,6 +37,14 @@ function compareQuotes(a, b) {
   return groupDifference || priority || Number(b.reference) - Number(a.reference) || a.brand.localeCompare(b.brand, 'vi');
 }
 
+function visibleQuote(row) {
+  const name = row.name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
+  const excluded = /\b(?:nu trang|trang suc|nguyen lieu|vang he thong|vang thi truong|phi sjc)\b/.test(name);
+  // Generic purity labels are metal quotes without an identified bar, ring, or bullion product.
+  const purityOnly = /^vang (?:\d+(?:[.,]\d+)?k?(?: \d{3,4}| ?\(\d+(?:[.,]\d+)?k\))?|trang au\d+)$/i.test(name);
+  return !excluded && !purityOnly;
+}
+
 function make(tag, value, cls) {
   const el = document.createElement(tag);
   if (value != null) el.textContent = value;
@@ -102,7 +110,7 @@ function renderSummary(rows) {
 
 function render() {
   if (!data) return;
-  const allRows = data.sources.flatMap(source => source.rows.map(row => ({
+  const allRows = data.sources.flatMap(source => source.rows.filter(visibleQuote).map(row => ({
     ...row, brand: source.name, brandId: source.id, cached: source.status === 'cached',
     spread: row.sell == null || row.buy == null ? null : row.sell - row.buy
   })));
@@ -178,7 +186,7 @@ async function refresh(manual = false) {
         localTime.format(new Date(data.checkedAt));
     }
     options(brand, data.sources.map(source => [source.id, source.name]));
-    const regions = Array.from(new Set(data.sources.flatMap(source => source.rows.map(row => row.region))));
+    const regions = Array.from(new Set(data.sources.flatMap(source => source.rows.filter(visibleQuote).map(row => row.region))));
     options(region, regions.sort((a, b) => a.localeCompare(b, 'vi')).map(value => [value, value]));
     showSources();
     render();

@@ -5,7 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    - cron: '*/5 * * * *'
+    # GitHub uses UTC. These slots cover 08:30–20:30 in Vietnam.
+    - cron: '30-55/5 1 * * *'
+    - cron: '*/5 2-12 * * *'
+    - cron: '0-30/5 13 * * *'
 
 permissions:
   contents: read

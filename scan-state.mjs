@@ -16,6 +16,12 @@ export function scanIsPaused(state, when = new Date()) {
   return Date.parse(state?.pausedUntil) > when.getTime();
 }
 
+export function scanWindowIsOpen(when = new Date()) {
+  const vietnamTime = new Date(when.getTime() + timezoneOffset);
+  const minuteOfDay = vietnamTime.getUTCHours() * 60 + vietnamTime.getUTCMinutes();
+  return minuteOfDay >= 8 * 60 + 30 && minuteOfDay <= 20 * 60 + 30;
+}
+
 export function recordScan(previous, snapshot, when = new Date()) {
   const current = snapshot.sources.filter(source => source.status === 'ok' && !source.partial && source.rows.length);
   const fingerprints = { ...previous?.fingerprints };

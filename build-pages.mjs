@@ -1,15 +1,16 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import './build.mjs';
-import { readScanState, recordScan, scanIsPaused, workflowOutput } from './scan-state.mjs';
+import { readScanState, recordScan, scanIsPaused, scanWindowIsOpen, workflowOutput } from './scan-state.mjs';
 
 const { default: worker } = await import('./dist/server/index.js');
 const liveOrigin = process.env.LIVE_PRICE_API_ORIGIN?.trim();
 const liveEndpoint = liveOrigin && new URL('/api/prices', liveOrigin).href;
+const onGitHub = process.env.GITHUB_ACTIONS === 'true';
 const isScheduled = process.env.GITHUB_EVENT_NAME === 'schedule';
-const previous = process.env.GITHUB_ACTIONS === 'true' ? (await readScanState())?.state : null;
+const previous = onGitHub ? (await readScanState())?.state : null;
 const paused = scanIsPaused(previous);
-if (isScheduled && paused) {
-  console.log('Tạm dừng quét đến', previous.pausedUntil);
+if (isScheduled && (paused || !scanWindowIsOpen())) {
+  console.log(paused ? 'Tạm dừng quét đến ' + previous.pausedUntil : 'Ngoài khung giờ quét 08:30–20:30');
   await workflowOutput(false);
   process.exit(0);
 }
@@ -49,13 +50,12 @@ async function publishedSnapshot() {
   const response = await fetch('https://ibrahimvu.github.io/so-vang-viet-nam/prices.json', {
     cache: 'no-store', signal: AbortSignal.timeout(10_000)
   });
-  if (!response.ok) throw new Error('Không đọc được bản giá đã xuất bản trong thời gian tạm dừng.');
+  if (!response.ok) throw new Error('Không đọc được bản giá đã xuất bản để dùng cho lần triển khai này.');
   return response.json();
 }
 
-const snapshot = paused ? await publishedSnapshot() : await fetchSnapshot();
-const next = isScheduled || !previous && process.env.GITHUB_ACTIONS === 'true' ?
-  recordScan(previous, snapshot) : null;
+const snapshot = onGitHub && !isScheduled ? await publishedSnapshot() : await fetchSnapshot();
+const next = isScheduled ? recordScan(previous, snapshot) : null;
 snapshot.scan = { pausedUntil: next ? next.pausedUntil : paused ? previous.pausedUntil : null };
 
 const connect = liveEndpoint ? ' ' + new URL(liveEndpoint).origin : '';
@@ -64,8 +64,8 @@ const policy = "default-src 'none'; script-src 'self'; style-src 'self'; img-src
 const endpointAttributes = 'data-endpoint="./prices.json"' +
   (liveEndpoint ? ' data-live-endpoint="' + liveEndpoint + '"' : '');
 const syncDescription = liveEndpoint ?
-  'Quét mỗi 5 phút, tạm dừng sau 20 lần liên tiếp giá không đổi và quét lại lúc 08:30 giờ Việt Nam. Chọn Làm mới để lấy giá theo yêu cầu.' :
-  'Quét mỗi 5 phút, tạm dừng sau 20 lần liên tiếp giá không đổi và tự quét lại lúc 08:30 giờ Việt Nam.';
+  'Quét mỗi 5 phút từ 08:30 đến 20:30 giờ Việt Nam. Sau 20 lần liên tiếp giá không đổi, quét lại từ 08:30. Chọn Làm mới để lấy giá theo yêu cầu.' :
+  'Quét mỗi 5 phút từ 08:30 đến 20:30 giờ Việt Nam. Sau 20 lần liên tiếp giá không đổi, tạm dừng đến 08:30 tiếp theo.';
 const html = (await readFile('index.html', 'utf8'))
   .replace('<meta charset="utf-8">', '<meta charset="utf-8">\n  <meta name="referrer" content="no-referrer">\n  <meta http-equiv="Content-Security-Policy" content="' + policy + '">')
   .replace('href="/style.css"', 'href="./style.css"')
