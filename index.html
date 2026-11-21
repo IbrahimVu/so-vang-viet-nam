@@ -45,10 +45,10 @@
         <label><span>Khu vực</span><select id="region"><option value="all">Tất cả khu vực</option></select></label>
         <label><span>Đơn vị</span><select id="unit"><option value="luong">đ / lượng</option><option value="chi">đ / chỉ</option></select></label>
       </div>
-      <div class="table-scroll" tabindex="0" aria-label="Cuộn bảng giá">
-        <table>
-          <thead><tr><th scope="col">Thương hiệu / Sản phẩm</th><th scope="col">Khu vực</th><th scope="col" class="num">Mua vào</th><th scope="col" class="num">Bán ra</th><th scope="col" class="num">Chênh lệch</th><th scope="col">Giờ niêm yết</th></tr></thead>
-          <tbody id="prices"><tr><td colspan="6" class="empty">Đang tải giá từ các nguồn niêm yết…</td></tr></tbody>
+      <div class="table-scroll">
+        <table role="table" aria-labelledby="table-title">
+          <thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Thương hiệu / Sản phẩm</th><th scope="col" role="columnheader">Khu vực</th><th scope="col" role="columnheader" class="num">Mua vào</th><th scope="col" role="columnheader" class="num">Bán ra</th><th scope="col" role="columnheader" class="num">Chênh lệch</th><th scope="col" role="columnheader">Giờ niêm yết</th></tr></thead>
+          <tbody id="prices" role="rowgroup"><tr role="row"><td colspan="6" role="cell" class="empty">Đang tải giá từ các nguồn niêm yết…</td></tr></tbody>
         </table>
       </div>
       <div class="pages" id="pagination" hidden>

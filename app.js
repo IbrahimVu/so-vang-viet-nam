@@ -16,7 +16,7 @@ const endpoint = status.dataset.endpoint;
 const liveEndpoint = status.dataset.liveEndpoint;
 const usesSnapshot = endpoint === './prices.json';
 let currentPage = 1;
-const pageSize = 24;
+const compactQuotes = matchMedia('(max-width: 820px)');
 const unit = $('unit');
 const region = $('region');
 const brand = $('brand-filter');
@@ -63,7 +63,20 @@ function options(select, values) {
   if (Array.from(select.options).some(option => option.value === current)) select.value = current;
 }
 
+function quoteCell(label, value, className) {
+  const cell = make('td', null, className);
+  cell.setAttribute('role', 'cell');
+  if (label) {
+    const heading = make('span', label, 'cell-label');
+    heading.setAttribute('aria-hidden', 'true');
+    cell.append(heading);
+  }
+  if (value != null) cell.append(make('span', value));
+  return cell;
+}
+
 function renderRows(rows) {
+  const pageSize = compactQuotes.matches ? 8 : 24;
   $('row-count').textContent = rows.length + ' niêm yết · ' + (unit.value === 'chi' ? 'đồng/chỉ' : 'đồng/lượng');
   const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
   currentPage = Math.min(currentPage, pageCount);
@@ -72,23 +85,26 @@ function renderRows(rows) {
   $('next').disabled = currentPage === pageCount;
   $('page-number').textContent = currentPage + ' / ' + pageCount;
   if (!rows.length) {
-    const cell = make('td', 'Không có giá niêm yết phù hợp với bộ lọc.', 'empty');
+    const cell = quoteCell('', 'Không có giá niêm yết phù hợp với bộ lọc.', 'empty');
     cell.colSpan = 6;
     const tr = make('tr');
+    tr.setAttribute('role', 'row');
     tr.append(cell);
     prices.replaceChildren(tr);
     return;
   }
   const offset = (currentPage - 1) * pageSize;
   prices.replaceChildren(...rows.slice(offset, offset + pageSize).map(row => {
-    const tr = make('tr');
-    const item = make('td');
+    const tr = make('tr', null, 'quote-row');
+    tr.setAttribute('role', 'row');
+    const item = quoteCell('', null, 'quote-product');
     item.append(make('span', row.name, 'product'), make('span', row.brand, 'meta'));
     const expired = row.cached || disconnected || snapshotExpired || row.time && Date.now() - Date.parse(row.time) > 86_400_000;
-    const timing = make('td', row.time ? sourceTime.format(new Date(row.time)) : '—', 'timing');
+    const timing = quoteCell('Giờ niêm yết', row.time ? sourceTime.format(new Date(row.time)) : '—', 'timing');
     if (expired) timing.append(make('div', row.cached || disconnected || snapshotExpired ? 'Giá đã lưu' : 'Quá 24 giờ', 'meta stale'));
-    tr.append(item, make('td', row.region), make('td', money(row.buy), 'num buy'),
-      make('td', money(row.sell), 'num sell'), make('td', money(row.spread), 'num'), timing);
+    tr.append(item, quoteCell('Khu vực', row.region, 'quote-region'),
+      quoteCell('Mua vào', money(row.buy), 'num buy'), quoteCell('Bán ra', money(row.sell), 'num sell'),
+      quoteCell('Chênh lệch', money(row.spread), 'num spread'), timing);
     return tr;
   }));
 }
@@ -124,17 +140,22 @@ function render() {
 function showSources() {
   $('source-list').replaceChildren(...data.sources.map(source => {
     const li = make('li');
-    const link = make('a', source.name);
-    link.href = source.url;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    link.referrerPolicy = 'no-referrer';
+    let url;
+    try { url = new URL(source.url); } catch {}
+    const canLink = url?.protocol === 'https:' && !url.username && !url.password;
+    const label = make(canLink ? 'a' : 'span', source.name);
+    if (canLink) {
+      label.href = url.href;
+      label.target = '_blank';
+      label.rel = 'noopener noreferrer';
+      label.referrerPolicy = 'no-referrer';
+    }
     const labels = { ok: 'Đã đồng bộ', cached: 'Dùng giá đã lưu', unavailable: 'Chưa kết nối' };
     const reasons = { blocked: 'Nguồn chặn truy cập tự động', timeout: 'Nguồn phản hồi quá chậm',
       http_error: 'Nguồn không phản hồi thành công', bad_response: 'Chưa đọc được bảng giá' };
     const detail = source.partial ? 'Đã đồng bộ một phần' :
       source.status === 'unavailable' && reasons[source.reason] || labels[source.status];
-    li.append(link, make('span', detail, 'source-state ' + source.status));
+    li.append(label, make('span', detail, 'source-state ' + source.status));
     return li;
   }));
 }
@@ -162,9 +183,11 @@ async function refresh(manual = false) {
   busy = true;
   $('refresh').disabled = true;
   if (manual && liveEndpoint) status.textContent = 'Đang yêu cầu giá mới từ các nguồn…';
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), 25_000);
   try {
     const response = await fetch(manual && liveEndpoint ? liveEndpoint : endpoint, {
-      signal: AbortSignal.timeout(25_000), cache: 'no-store', credentials: manual && liveEndpoint ? 'omit' : 'same-origin'
+      signal: controller.signal, cache: 'no-store', credentials: manual && liveEndpoint ? 'omit' : 'same-origin'
     });
     if (!response.ok) throw new Error('HTTP ' + response.status);
     const next = await response.json();
@@ -194,6 +217,7 @@ async function refresh(manual = false) {
     if (data) render();
     else prices.querySelector('td').textContent = 'Không tải được giá. Chọn Làm mới để thử lại.';
   } finally {
+    clearTimeout(deadline);
     busy = false;
     $('refresh').disabled = false;
   }
@@ -210,8 +234,14 @@ for (const control of [brand, region]) control.addEventListener('change', () => 
   render();
 });
 unit.addEventListener('change', render);
-$('previous').addEventListener('click', () => { currentPage -= 1; render(); });
-$('next').addEventListener('click', () => { currentPage += 1; render(); });
+function changePage(step) {
+  currentPage += step;
+  render();
+  if (compactQuotes.matches) $('bang-gia').scrollIntoView({ block: 'start' });
+}
+$('previous').addEventListener('click', () => changePage(-1));
+$('next').addEventListener('click', () => changePage(1));
+compactQuotes.addEventListener('change', () => { currentPage = 1; render(); });
 $('refresh').addEventListener('click', () => refresh(true));
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 setInterval(() => { if (!document.hidden) refresh(); }, 60_000);

@@ -2,7 +2,12 @@ import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import './build.mjs';
 
 const { default: worker } = await import('./dist/server/index.js');
-const liveOrigin = process.env.LIVE_PRICE_API_ORIGIN?.trim();
+const liveOriginSetting = process.env.LIVE_PRICE_API_ORIGIN?.trim();
+const liveOrigin = liveOriginSetting && URL.canParse(liveOriginSetting) ? new URL(liveOriginSetting) : null;
+if (liveOriginSetting && (liveOrigin?.protocol !== 'https:' || liveOrigin.username || liveOrigin.password ||
+    liveOrigin.pathname !== '/' || liveOrigin.search || liveOrigin.hash)) {
+  throw new Error('LIVE_PRICE_API_ORIGIN phải là địa chỉ gốc HTTPS.');
+}
 const liveEndpoint = liveOrigin && new URL('/api/prices', liveOrigin).href;
 const onGitHub = process.env.GITHUB_ACTIONS === 'true';
 const isScheduled = process.env.GITHUB_EVENT_NAME === 'schedule';
@@ -58,7 +63,7 @@ async function fetchSnapshot() {
 
 async function publishedSnapshot() {
   const response = await fetch('https://ibrahimvu.github.io/so-vang-viet-nam/prices.json', {
-    cache: 'no-store', signal: AbortSignal.timeout(10_000)
+    cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(10_000)
   });
   if (!response.ok) throw new Error('Không đọc được bản giá đã xuất bản để dùng cho lần triển khai này.');
   return response.json();
