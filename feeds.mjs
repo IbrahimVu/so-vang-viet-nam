@@ -4,8 +4,12 @@ const zones = [
 ];
 
 const maxFeedBytes = 2 * 1024 * 1024;
-const sjcUrl = 'https://sjc.com.vn/bieu-do-gia-vang';
+const sjcUrl = 'https://sjc.com.vn/gia-vang-online';
+const sjcChartUrl = 'https://sjc.com.vn/bieu-do-gia-vang';
+const sjcPriceUrl = 'https://sjc.com.vn/GoldPrice/Services/PriceService.ashx?method=GetCurrentGoldPricesByBranch&BranchId=1';
 const btmcUrl = 'https://btmc.vn/gia-vang-theo-ngay.html';
+const btmcTableUrl = 'https://btmc.vn/Home/BGiaVang';
+const btmcChartUrl = 'https://btmc.vn/bieu-do-gia-vang.html?t=ngay';
 
 async function fetchFeed(url) {
   const response = await fetch(url, {
@@ -117,24 +121,42 @@ async function phuQuy() {
   return { rows };
 }
 
-async function btmcDaily() {
-  const html = await fetchFeed(btmcUrl);
-  const dateControl = html.match(/<input\b[^>]*\bid="datepicker11"[^>]*>/i)?.[0] ?? '';
-  const date = dateControl.match(/\bvalue="(\d{2}\/\d{2}\/\d{4})"/i)?.[1];
-  const today = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Ho_Chi_Minh' }).format();
-  if (date !== today || !/ĐVT 1 = 1\.000 VNĐ/i.test(plain(html))) {
-    throw new Error('BTMC daily date or unit could not be verified');
+async function btmcBoard(url) {
+  const html = await fetchFeed(url);
+  const table = html.match(/<table\b[^>]*class="[^"]*\bbd_price_home\b[^"]*"[^>]*>[\s\S]*?<\/table>/i);
+  if (!table || !/ĐVT\s+1\s*=\s*1\.000\s*VNĐ/i.test(plain(html))) {
+    throw new Error('BTMC price table or unit could not be verified');
   }
-  const table = html.split('(buy)')[1]?.split('</table>')[0] ?? '';
-  const rows = tableRows(table).map(cells => {
-    const [name, , buy, sell] = cells.slice(-5, -1);
+  const timing = plain(html).match(/Cập nhật lúc:?\s*\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}(?::\d{2})?/i);
+  const time = quoteTime(timing?.[0]);
+  if (!time) {
+    const dateControl = html.match(/<input\b[^>]*\bid="datepicker11"[^>]*>/i)?.[0] ?? '';
+    const date = dateControl.match(/\bvalue="(\d{2}\/\d{2}\/\d{4})"/i)?.[1];
+    const today = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Ho_Chi_Minh' }).format();
+    if (url !== btmcUrl || date !== today) throw new Error('BTMC date could not be verified');
+  }
+  const rows = tableRows(table[0]).map(cells => {
+    const prices = ascii(cells.at(-1) ?? '') === 'xem chi tiet' ? cells.slice(0, -1) : cells;
+    const [name, , buy, sell] = prices.slice(-4);
     if (!name || !/^(vàng|nhẫn|quà mừng|trang sức vàng)/i.test(name)) return null;
-    return quote(name, buy, sell, 1000, 'Hà Nội', null);
+    return quote(name, buy, sell, 1000, 'Hà Nội', time);
   }).filter(Boolean);
+  if (!rows.length) throw new Error('Empty BTMC price table');
   return { rows };
 }
 
 async function btmc(env) {
+  let primaryError;
+  try {
+    return await btmcBoard(btmcTableUrl);
+  } catch (error) {
+    primaryError = error;
+  }
+  const boards = await Promise.allSettled([btmcChartUrl, btmcUrl].map(btmcBoard));
+  const available = boards.filter(board => board.status === 'fulfilled').map(board => board.value);
+  available.sort((first, second) => (Date.parse(second.rows[0].time) || 0) - (Date.parse(first.rows[0].time) || 0));
+  if (available.length) return available[0];
+
   let apiKey = env?.BTMC_API_KEY;
   if (!apiKey && env?.readPublishedBtmcKey) {
     try {
@@ -155,10 +177,10 @@ async function btmc(env) {
       }).filter(Boolean);
       if (rows.length) return { rows };
     } catch {
-      // Try BTMC's public daily board if its official API is temporarily unavailable.
+      // Report the failure of the primary public price table.
     }
   }
-  return btmcDaily();
+  throw primaryError;
 }
 
 async function miHong() {
@@ -183,8 +205,24 @@ async function btmh() {
   return { rows };
 }
 
-async function sjc() {
-  const html = await fetchFeed(sjcUrl);
+async function sjcOnline() {
+  const payload = JSON.parse(await fetchFeed(sjcPriceUrl));
+  const time = quoteTime(payload.latestDate);
+  if (payload.success !== true || !time || !Array.isArray(payload.data)) throw new Error('Invalid SJC price response');
+  const value = amount => Number.isSafeInteger(amount) ? amount : null;
+  const rows = payload.data.map(item => {
+    if (typeof item?.BranchName !== 'string' || !item.BranchName.trim()) return null;
+    const branch = item.BranchName.trim();
+    const region = branch === 'Hồ Chí Minh' ? 'TP. Hồ Chí Minh' : branch;
+    // SJC publishes numeric VND per lượng. The dashboard stores VND per chỉ.
+    return quote(item.TypeName, value(item.BuyValue), value(item.SellValue), 0.1, region, time);
+  }).filter(Boolean);
+  if (!rows.length) throw new Error('Empty SJC price response');
+  return { rows };
+}
+
+async function sjcChart() {
+  const html = await fetchFeed(sjcChartUrl);
   const time = quoteTime(plain(html).match(/(?:cập nhật|thời điểm)[\s\S]{0,80}/i)?.[0]);
   const table = [...html.matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/gi)]
     .find(([, value]) => /nghin dong\s*\/\s*luong.*mua.*ban/.test(ascii(plain(value))));
@@ -201,6 +239,16 @@ async function sjc() {
     return quote(isProduct ? label : 'Vàng miếng SJC', amount(buy), amount(sell), perLuong ? 100 : 1000,
       isProduct ? 'Bảng giá SJC' : label, time);
   }).filter(Boolean) };
+}
+
+async function sjc() {
+  try {
+    return await sjcOnline();
+  } catch (error) {
+    const chart = await sjcChart().catch(() => null);
+    if (chart?.rows.length) return chart;
+    throw error;
+  }
 }
 
 async function doji() {
