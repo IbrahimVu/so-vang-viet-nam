@@ -1,5 +1,6 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import './build.mjs';
+import { scanIntervalMs, scanSlot, scanWindowIsOpen } from './scan-window.mjs';
 
 const { default: worker } = await import('./dist/server/index.js');
 const liveOriginSetting = process.env.LIVE_PRICE_API_ORIGIN?.trim();
@@ -9,17 +10,14 @@ if (liveOriginSetting && (liveOrigin?.protocol !== 'https:' || liveOrigin.userna
   throw new Error('LIVE_PRICE_API_ORIGIN phải là địa chỉ gốc HTTPS.');
 }
 const liveEndpoint = liveOrigin && new URL('/api/prices', liveOrigin).href;
+const cloudSnapshot = process.env.PRICE_SNAPSHOT_URL?.trim();
+if (cloudSnapshot && !/^https:\/\/storage\.googleapis\.com\/[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\/prices\.json$/.test(cloudSnapshot)) {
+  throw new Error('PRICE_SNAPSHOT_URL must point to a public Cloud Storage prices.json object.');
+}
 const onGitHub = process.env.GITHUB_ACTIONS === 'true';
 const isScheduled = process.env.GITHUB_EVENT_NAME === 'schedule';
 const isManual = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
 const now = Date.now();
-const scanInterval = 5 * 60_000;
-
-function scanWindowIsOpen(at) {
-  const vietnamTime = new Date(at + 7 * 60 * 60_000);
-  const minuteOfDay = vietnamTime.getUTCHours() * 60 + vietnamTime.getUTCMinutes();
-  return minuteOfDay >= 8 * 60 + 30 && minuteOfDay <= 20 * 60 + 30;
-}
 
 async function workflowOutput(publish) {
   if (process.env.GITHUB_OUTPUT) {
@@ -28,24 +26,16 @@ async function workflowOutput(publish) {
 }
 
 const duringScanWindow = scanWindowIsOpen(now);
-if (isScheduled && !duringScanWindow) {
-  console.log('Ngoài khung giờ quét 08:30–20:30');
+if (isScheduled && (cloudSnapshot || !duringScanWindow)) {
+  console.log(cloudSnapshot ? 'Cloud Scheduler đang phụ trách quét giá.' : 'Ngoài khung giờ quét 08:30–20:30');
   await workflowOutput(false);
   process.exit(0);
 }
 
 async function fetchSnapshot() {
-  const btmcDocs = 'https://btmc.vn/thong-tin/tai-lieu-api/api-gia-vang-17784.html';
-  let btmcKey = process.env.BTMC_API_KEY;
-  if (!btmcKey) {
-    try {
-      const docs = await fetch(btmcDocs, { redirect: 'error', signal: AbortSignal.timeout(6000) });
-      if (docs.ok) btmcKey = (await docs.text()).match(/getpricebtmc\?key=([a-z0-9]{20,60})/i)?.[1];
-    } catch {
-      // The worker can still try BTMC's daily table.
-    }
-  }
-  const response = await worker.fetch(new Request('https://localhost/api/prices'), { BTMC_API_KEY: btmcKey });
+  const response = await worker.fetch(new Request('https://localhost/api/prices'), {
+    BTMC_API_KEY: process.env.BTMC_API_KEY, readPublishedBtmcKey: true
+  });
   const snapshot = await response.json();
   if (liveEndpoint && snapshot.sources.some(source => source.status !== 'ok')) {
     try {
@@ -66,7 +56,8 @@ async function fetchSnapshot() {
 }
 
 async function publishedSnapshot() {
-  const url = 'https://ibrahimvu.github.io/so-vang-viet-nam/prices.json?check=' + now;
+  const endpoint = cloudSnapshot || 'https://ibrahimvu.github.io/so-vang-viet-nam/prices.json';
+  const url = endpoint + '?check=' + now;
   const response = await fetch(url, {
     cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(10_000)
   });
@@ -78,17 +69,18 @@ async function publishedSnapshot() {
   return snapshot;
 }
 
-const previous = onGitHub ? await publishedSnapshot().catch(() => null) : null;
+const previous = cloudSnapshot ? await publishedSnapshot() :
+  onGitHub ? await publishedSnapshot().catch(() => null) : null;
 const lastScan = Date.parse(previous?.checkedAt);
-const currentSlot = Math.floor(now / scanInterval) * scanInterval;
+const currentSlot = scanSlot(now);
 if (isScheduled && lastScan >= currentSlot) {
   console.log('Đã có dữ liệu cho phiên quét 5 phút hiện tại.');
   await workflowOutput(false);
   process.exit(0);
 }
 
-const shouldScan = !onGitHub || duringScanWindow &&
-  (isScheduled || isManual || !(now - lastScan < 2 * scanInterval));
+const shouldScan = !cloudSnapshot && (!onGitHub || duringScanWindow &&
+  (isScheduled || isManual || !(now - lastScan < 2 * scanIntervalMs)));
 let snapshot = previous;
 if (shouldScan) {
   try {
@@ -108,10 +100,13 @@ if (shouldScan) {
 if (!snapshot) throw new Error('Không có bản giá để xuất bản.');
 delete snapshot.scan;
 
-const connect = liveEndpoint ? ' ' + new URL(liveEndpoint).origin : '';
+const connect = [...new Set([liveEndpoint, cloudSnapshot].filter(Boolean).map(url => new URL(url).origin))]
+  .map(origin => ' ' + origin).join('');
 const policy = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'" +
   connect + "; base-uri 'none'; form-action 'none'";
-const endpointAttributes = 'data-endpoint="./prices.json"' +
+const endpointAttributes = (cloudSnapshot ?
+  'data-endpoint="' + cloudSnapshot + '" data-fallback-endpoint="./prices.json"' :
+  'data-endpoint="./prices.json"') +
   (liveEndpoint ? ' data-live-endpoint="' + liveEndpoint + '"' : '');
 const syncDescription = liveEndpoint ?
   'Quét mỗi 5 phút từ 08:30 đến 20:30 giờ Việt Nam. Chọn Làm mới để lấy giá theo yêu cầu.' :

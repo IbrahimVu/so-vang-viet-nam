@@ -1,0 +1,8 @@
+[
+  {
+    "origin": ["https://ibrahimvu.github.io"],
+    "method": ["GET", "HEAD"],
+    "responseHeader": ["Content-Type", "Cache-Control"],
+    "maxAgeSeconds": 300
+  }
+]

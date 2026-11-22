@@ -2,6 +2,7 @@
   "name": "so-vang-viet-nam",
   "private": true,
   "type": "module",
+  "engines": { "node": "22.x || 24.x" },
   "scripts": {
     "build": "node build.mjs",
     "build:pages": "node build-pages.mjs",

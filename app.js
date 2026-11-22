@@ -17,7 +17,8 @@ let snapshotExpired = false;
 const status = $('status');
 const endpoint = status.dataset.endpoint;
 const liveEndpoint = status.dataset.liveEndpoint;
-const usesSnapshot = endpoint === './prices.json';
+const fallbackEndpoint = status.dataset.fallbackEndpoint;
+const usesSnapshot = endpoint === './prices.json' || Boolean(fallbackEndpoint);
 let currentPage = 1;
 const compactQuotes = matchMedia('(max-width: 820px)');
 const unit = $('unit');
@@ -181,29 +182,46 @@ function mergePrices(next, previous, manual) {
   return { ...next, checkedAt, sources };
 }
 
+async function loadPriceData(url, credentials, timeout = 25_000) {
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, { signal: controller.signal, cache: 'no-store', credentials });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const snapshot = await response.json();
+    if (!Array.isArray(snapshot.sources) || !Number.isFinite(Date.parse(snapshot.checkedAt))) throw new Error('Invalid price data');
+    return snapshot;
+  } finally {
+    clearTimeout(deadline);
+  }
+}
+
 async function refresh(manual = false) {
   if (busy) return;
   busy = true;
   $('refresh').disabled = true;
-  if (manual && liveEndpoint) status.textContent = 'Đang yêu cầu giá mới từ các nguồn…';
-  const controller = new AbortController();
-  const deadline = setTimeout(() => controller.abort(), 25_000);
+  const manualLive = manual && !!liveEndpoint;
+  if (manualLive) status.textContent = 'Đang yêu cầu giá mới từ các nguồn…';
   try {
-    const response = await fetch(manual && liveEndpoint ? liveEndpoint : endpoint, {
-      signal: controller.signal, cache: 'no-store', credentials: manual && liveEndpoint ? 'omit' : 'same-origin'
-    });
-    if (!response.ok) throw new Error('HTTP ' + response.status);
-    const next = await response.json();
+    let usingFallback = false;
+    const next = await loadPriceData(manualLive ? liveEndpoint : endpoint,
+      manualLive || fallbackEndpoint ? 'omit' : 'same-origin', fallbackEndpoint && !manualLive ? 10_000 : 25_000)
+      .catch(error => {
+        if (!fallbackEndpoint || manualLive) throw error;
+        usingFallback = true;
+        return loadPriceData(fallbackEndpoint, 'same-origin');
+      });
     data = mergePrices(next, data, manual);
-    disconnected = false;
+    disconnected = usingFallback;
     const active = data.sources.filter(source => source.status === 'ok').length;
     snapshotExpired = usesSnapshot && Date.now() - Date.parse(data.checkedAt) > 15 * 60_000;
-    status.dataset.live = String(active > 0 && !snapshotExpired);
+    status.dataset.live = String(active > 0 && !snapshotExpired && !usingFallback);
     if (usesSnapshot) {
       const online = manual && liveEndpoint ? next.sources.filter(source => source.status === 'ok').length : active;
       const vietnamTime = vietnamClock.format(new Date());
       const waiting = vietnamTime >= '08:30' && vietnamTime <= '20:30' ? 'Chờ lượt quét mới' : 'Ngoài giờ quét';
-      status.textContent = (snapshotExpired ? waiting + ' · ' : online + '/' + data.sources.length + ' nguồn · ') +
+      const details = usingFallback ? 'Đang dùng giá đã lưu' : snapshotExpired ? waiting : online + '/' + data.sources.length + ' nguồn';
+      status.textContent = details + ' · ' +
         'Lần lấy giá ' + sourceTime.format(new Date(data.checkedAt));
     } else {
       status.textContent = active + '/' + data.sources.length + ' nguồn đã đồng bộ · Kiểm tra lúc ' +
@@ -222,7 +240,6 @@ async function refresh(manual = false) {
     if (data) render();
     else prices.querySelector('td').textContent = 'Không tải được giá. Chọn Làm mới để thử lại.';
   } finally {
-    clearTimeout(deadline);
     busy = false;
     $('refresh').disabled = false;
   }

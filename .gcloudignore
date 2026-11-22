@@ -1,0 +1,7 @@
+.gcloudignore
+.git/
+.github/
+#!include:.gitignore
+cloud-deploy.ps1
+cloud-deploy.md
+cloud-storage-cors.json

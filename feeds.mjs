@@ -135,10 +135,17 @@ async function btmcDaily() {
 }
 
 async function btmc(env) {
-  if (env?.BTMC_API_KEY) {
+  let apiKey = env?.BTMC_API_KEY;
+  if (!apiKey && env?.readPublishedBtmcKey) {
+    try {
+      const docs = await fetchFeed('https://btmc.vn/thong-tin/tai-lieu-api/api-gia-vang-17784.html');
+      apiKey = docs.match(/getpricebtmc\?key=([a-z0-9]{20,60})/i)?.[1];
+    } catch {}
+  }
+  if (apiKey) {
     try {
       const endpoint = new URL('https://api.btmc.vn/api/BTMCAPI/getpricebtmc');
-      endpoint.searchParams.set('key', env.BTMC_API_KEY);
+      endpoint.searchParams.set('key', apiKey);
       const payload = JSON.parse(await fetchFeed(endpoint));
       const rows = payload.DataList.Data.map(item => {
         const id = item['@row'];
