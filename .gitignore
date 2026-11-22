@@ -4,3 +4,5 @@
 .env.*
 !.env.example
 /.openai/
+/supabase/.temp/
+/supabase/functions/gold-scan/index.ts

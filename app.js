@@ -18,6 +18,8 @@ const status = $('status');
 const endpoint = status.dataset.endpoint;
 const liveEndpoint = status.dataset.liveEndpoint;
 const fallbackEndpoint = status.dataset.fallbackEndpoint;
+const refreshEndpoint = status.dataset.refreshEndpoint;
+const priceKey = status.dataset.priceKey;
 const usesSnapshot = endpoint === './prices.json' || Boolean(fallbackEndpoint);
 let currentPage = 1;
 const compactQuotes = matchMedia('(max-width: 820px)');
@@ -186,7 +188,8 @@ async function loadPriceData(url, credentials, timeout = 25_000) {
   const controller = new AbortController();
   const deadline = setTimeout(() => controller.abort(), timeout);
   try {
-    const response = await fetch(url, { signal: controller.signal, cache: 'no-store', credentials });
+    const headers = priceKey && url === endpoint ? { apikey: priceKey } : undefined;
+    const response = await fetch(url, { signal: controller.signal, cache: 'no-store', credentials, headers, redirect: 'error' });
     if (!response.ok) throw new Error('HTTP ' + response.status);
     const snapshot = await response.json();
     if (!Array.isArray(snapshot.sources) || !Number.isFinite(Date.parse(snapshot.checkedAt))) throw new Error('Invalid price data');
@@ -196,15 +199,52 @@ async function loadPriceData(url, credentials, timeout = 25_000) {
   }
 }
 
+async function requestGoldScan() {
+  const response = await fetch(refreshEndpoint, {
+    method: 'POST', headers: { apikey: priceKey, 'Content-Type': 'application/json' },
+    body: '{}', credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(8000)
+  });
+  if (!response.ok) throw new Error('Không gửi được yêu cầu quét');
+  return response.json();
+}
+
+async function waitForGoldScan({ outcome, requestedAt }) {
+  if (outcome === 'daily_limit') return null;
+  const threshold = Date.parse(requestedAt);
+  if (!Number.isFinite(threshold) || (outcome !== 'queued' && outcome !== 'cooldown')) {
+    throw new Error('Trạng thái quét không hợp lệ');
+  }
+  const deadline = Date.now() + 35_000;
+  while (Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 2500));
+    const snapshot = await loadPriceData(endpoint, 'omit', 5000);
+    if (Date.parse(snapshot.checkedAt) >= threshold) return snapshot;
+  }
+  return null;
+}
+
 async function refresh(manual = false) {
   if (busy) return;
   busy = true;
   $('refresh').disabled = true;
   const manualLive = manual && !!liveEndpoint;
-  if (manualLive) status.textContent = 'Đang yêu cầu giá mới từ các nguồn…';
+  const manualScan = manual && !!refreshEndpoint;
+  if (manualLive || manualScan) status.textContent = 'Đang yêu cầu giá mới từ các nguồn…';
   try {
     let usingFallback = false;
-    const next = await loadPriceData(manualLive ? liveEndpoint : endpoint,
+    let scanNotice;
+    let next;
+    if (manualScan) {
+      try {
+        const result = await requestGoldScan();
+        next = await waitForGoldScan(result);
+        if (!next) scanNotice = result.outcome === 'daily_limit' ? 'Đã đạt giới hạn làm mới trong ngày' :
+          'Chưa có kết quả quét mới';
+      } catch {
+        scanNotice = 'Chưa lấy được giá mới theo yêu cầu';
+      }
+    }
+    next ??= await loadPriceData(manualLive ? liveEndpoint : endpoint,
       manualLive || fallbackEndpoint ? 'omit' : 'same-origin', fallbackEndpoint && !manualLive ? 10_000 : 25_000)
       .catch(error => {
         if (!fallbackEndpoint || manualLive) throw error;
@@ -220,7 +260,7 @@ async function refresh(manual = false) {
       const online = manual && liveEndpoint ? next.sources.filter(source => source.status === 'ok').length : active;
       const vietnamTime = vietnamClock.format(new Date());
       const waiting = vietnamTime >= '08:30' && vietnamTime <= '20:30' ? 'Chờ lượt quét mới' : 'Ngoài giờ quét';
-      const details = usingFallback ? 'Đang dùng giá đã lưu' : snapshotExpired ? waiting : online + '/' + data.sources.length + ' nguồn';
+      const details = scanNotice ?? (usingFallback ? 'Đang dùng giá đã lưu' : snapshotExpired ? waiting : online + '/' + data.sources.length + ' nguồn');
       status.textContent = details + ' · ' +
         'Lần lấy giá ' + sourceTime.format(new Date(data.checkedAt));
     } else {
@@ -235,7 +275,7 @@ async function refresh(manual = false) {
   } catch {
     disconnected = true;
     $('status').dataset.live = 'false';
-    $('status').textContent = data && manual && liveEndpoint ? 'Chưa lấy được giá mới · Đang giữ bảng giá đã tải' :
+    $('status').textContent = data && (manualLive || manualScan) ? 'Chưa lấy được giá mới · Đang giữ bảng giá đã tải' :
       data ? 'Mất kết nối · Đang hiển thị giá đã lưu' : 'Chưa kết nối được bảng giá';
     if (data) render();
     else prices.querySelector('td').textContent = 'Không tải được giá. Chọn Làm mới để thử lại.';

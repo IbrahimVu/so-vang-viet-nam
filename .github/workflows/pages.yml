@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.ref == 'refs/heads/main' && (github.event_name != 'schedule' || vars.PRICE_SNAPSHOT_URL == '')
+    if: github.ref == 'refs/heads/main' && (github.event_name != 'schedule' || (vars.PRICE_SNAPSHOT_URL == '' && vars.GOLD_SUPABASE_REF == ''))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -37,6 +37,8 @@ jobs:
         run: node build-pages.mjs
         env:
           PRICE_SNAPSHOT_URL: ${{ vars.PRICE_SNAPSHOT_URL }}
+          GOLD_SUPABASE_REF: ${{ vars.GOLD_SUPABASE_REF }}
+          GOLD_SUPABASE_PUBLISHABLE_KEY: ${{ vars.GOLD_SUPABASE_PUBLISHABLE_KEY }}
       - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         if: steps.scan.outputs.publish == 'true'
         with:

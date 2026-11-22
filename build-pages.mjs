@@ -14,6 +14,14 @@ const cloudSnapshot = process.env.PRICE_SNAPSHOT_URL?.trim();
 if (cloudSnapshot && !/^https:\/\/storage\.googleapis\.com\/[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\/prices\.json$/.test(cloudSnapshot)) {
   throw new Error('PRICE_SNAPSHOT_URL must point to a public Cloud Storage prices.json object.');
 }
+const supabaseRef = process.env.GOLD_SUPABASE_REF?.trim();
+const supabaseKey = process.env.GOLD_SUPABASE_PUBLISHABLE_KEY?.trim();
+if ((supabaseRef || supabaseKey) && (!/^[a-z0-9]{20}$/.test(supabaseRef ?? '') ||
+    !/^sb_publishable_[A-Za-z0-9_-]{20,100}$/.test(supabaseKey ?? '') || cloudSnapshot || liveEndpoint)) {
+  throw new Error('Use a Supabase project reference and publishable key with no other live source configured.');
+}
+const supabaseRpc = supabaseRef && 'https://' + supabaseRef + '.supabase.co/rest/v1/rpc/';
+const snapshotEndpoint = supabaseRpc ? supabaseRpc + 'gold_prices' : cloudSnapshot;
 const onGitHub = process.env.GITHUB_ACTIONS === 'true';
 const isScheduled = process.env.GITHUB_EVENT_NAME === 'schedule';
 const isManual = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
@@ -26,8 +34,8 @@ async function workflowOutput(publish) {
 }
 
 const duringScanWindow = scanWindowIsOpen(now);
-if (isScheduled && (cloudSnapshot || !duringScanWindow)) {
-  console.log(cloudSnapshot ? 'Cloud Scheduler đang phụ trách quét giá.' : 'Ngoài khung giờ quét 08:30–20:30');
+if (isScheduled && (snapshotEndpoint || !duringScanWindow)) {
+  console.log(snapshotEndpoint ? 'Bộ quét ngoài GitHub đang hoạt động.' : 'Ngoài khung giờ quét 08:30–20:30');
   await workflowOutput(false);
   process.exit(0);
 }
@@ -56,20 +64,21 @@ async function fetchSnapshot() {
 }
 
 async function publishedSnapshot() {
-  const endpoint = cloudSnapshot || 'https://ibrahimvu.github.io/so-vang-viet-nam/prices.json';
-  const url = endpoint + '?check=' + now;
+  const endpoint = snapshotEndpoint || 'https://ibrahimvu.github.io/so-vang-viet-nam/prices.json';
+  const url = supabaseRpc ? endpoint : endpoint + '?check=' + now;
   const response = await fetch(url, {
-    cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(10_000)
+    cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(10_000),
+    headers: supabaseRpc ? { apikey: supabaseKey } : undefined
   });
   if (!response.ok) throw new Error('Không đọc được bản giá đã xuất bản để dùng cho lần triển khai này.');
   const snapshot = await response.json();
-  if (!Array.isArray(snapshot.sources) || !Number.isFinite(Date.parse(snapshot.checkedAt))) {
+  if (!Array.isArray(snapshot?.sources) || !Number.isFinite(Date.parse(snapshot.checkedAt))) {
     throw new Error('Bản giá đã xuất bản không hợp lệ.');
   }
   return snapshot;
 }
 
-const previous = cloudSnapshot ? await publishedSnapshot() :
+const previous = snapshotEndpoint ? await publishedSnapshot() :
   onGitHub ? await publishedSnapshot().catch(() => null) : null;
 const lastScan = Date.parse(previous?.checkedAt);
 const currentSlot = scanSlot(now);
@@ -79,7 +88,7 @@ if (isScheduled && lastScan >= currentSlot) {
   process.exit(0);
 }
 
-const shouldScan = !cloudSnapshot && (!onGitHub || duringScanWindow &&
+const shouldScan = !snapshotEndpoint && (!onGitHub || duringScanWindow &&
   (isScheduled || isManual || !(now - lastScan < 2 * scanIntervalMs)));
 let snapshot = previous;
 if (shouldScan) {
@@ -100,15 +109,16 @@ if (shouldScan) {
 if (!snapshot) throw new Error('Không có bản giá để xuất bản.');
 delete snapshot.scan;
 
-const connect = [...new Set([liveEndpoint, cloudSnapshot].filter(Boolean).map(url => new URL(url).origin))]
+const connect = [...new Set([liveEndpoint, snapshotEndpoint].filter(Boolean).map(url => new URL(url).origin))]
   .map(origin => ' ' + origin).join('');
 const policy = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'" +
   connect + "; base-uri 'none'; form-action 'none'";
-const endpointAttributes = (cloudSnapshot ?
-  'data-endpoint="' + cloudSnapshot + '" data-fallback-endpoint="./prices.json"' :
+const endpointAttributes = (snapshotEndpoint ?
+  'data-endpoint="' + snapshotEndpoint + '" data-fallback-endpoint="./prices.json"' :
   'data-endpoint="./prices.json"') +
-  (liveEndpoint ? ' data-live-endpoint="' + liveEndpoint + '"' : '');
-const syncDescription = liveEndpoint ?
+  (liveEndpoint ? ' data-live-endpoint="' + liveEndpoint + '"' : '') +
+  (supabaseRpc ? ' data-refresh-endpoint="' + supabaseRpc + 'gold_refresh" data-price-key="' + supabaseKey + '"' : '');
+const syncDescription = liveEndpoint || supabaseRpc ?
   'Quét mỗi 5 phút từ 08:30 đến 20:30 giờ Việt Nam. Chọn Làm mới để lấy giá theo yêu cầu.' :
   'Quét mỗi 5 phút từ 08:30 đến 20:30 giờ Việt Nam.';
 const html = (await readFile('index.html', 'utf8'))
