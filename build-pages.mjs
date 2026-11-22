@@ -11,9 +11,12 @@ if (liveOriginSetting && (liveOrigin?.protocol !== 'https:' || liveOrigin.userna
 const liveEndpoint = liveOrigin && new URL('/api/prices', liveOrigin).href;
 const onGitHub = process.env.GITHUB_ACTIONS === 'true';
 const isScheduled = process.env.GITHUB_EVENT_NAME === 'schedule';
+const isManual = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
+const now = Date.now();
+const scanInterval = 5 * 60_000;
 
-function scanWindowIsOpen() {
-  const vietnamTime = new Date(Date.now() + 7 * 60 * 60_000);
+function scanWindowIsOpen(at) {
+  const vietnamTime = new Date(at + 7 * 60 * 60_000);
   const minuteOfDay = vietnamTime.getUTCHours() * 60 + vietnamTime.getUTCMinutes();
   return minuteOfDay >= 8 * 60 + 30 && minuteOfDay <= 20 * 60 + 30;
 }
@@ -24,7 +27,8 @@ async function workflowOutput(publish) {
   }
 }
 
-if (isScheduled && !scanWindowIsOpen()) {
+const duringScanWindow = scanWindowIsOpen(now);
+if (isScheduled && !duringScanWindow) {
   console.log('Ngoài khung giờ quét 08:30–20:30');
   await workflowOutput(false);
   process.exit(0);
@@ -62,14 +66,46 @@ async function fetchSnapshot() {
 }
 
 async function publishedSnapshot() {
-  const response = await fetch('https://ibrahimvu.github.io/so-vang-viet-nam/prices.json', {
+  const url = 'https://ibrahimvu.github.io/so-vang-viet-nam/prices.json?check=' + now;
+  const response = await fetch(url, {
     cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(10_000)
   });
   if (!response.ok) throw new Error('Không đọc được bản giá đã xuất bản để dùng cho lần triển khai này.');
-  return response.json();
+  const snapshot = await response.json();
+  if (!Array.isArray(snapshot.sources) || !Number.isFinite(Date.parse(snapshot.checkedAt))) {
+    throw new Error('Bản giá đã xuất bản không hợp lệ.');
+  }
+  return snapshot;
 }
 
-const snapshot = onGitHub && !isScheduled ? await publishedSnapshot() : await fetchSnapshot();
+const previous = onGitHub ? await publishedSnapshot().catch(() => null) : null;
+const lastScan = Date.parse(previous?.checkedAt);
+const currentSlot = Math.floor(now / scanInterval) * scanInterval;
+if (isScheduled && lastScan >= currentSlot) {
+  console.log('Đã có dữ liệu cho phiên quét 5 phút hiện tại.');
+  await workflowOutput(false);
+  process.exit(0);
+}
+
+const shouldScan = !onGitHub || duringScanWindow &&
+  (isScheduled || isManual || !(now - lastScan < 2 * scanInterval));
+let snapshot = previous;
+if (shouldScan) {
+  try {
+    snapshot = await fetchSnapshot();
+    if (previous) {
+      snapshot.sources = snapshot.sources.map(source => {
+        const saved = previous.sources.find(item => item.id === source.id);
+        return source.rows.length || !saved?.rows.length ? source :
+          { ...source, status: 'cached', rows: saved.rows, checkedAt: saved.checkedAt };
+      });
+    }
+  } catch (error) {
+    if (isScheduled || !previous) throw error;
+    console.warn('Chưa lấy được giá mới. Tiếp tục dùng bản giá đã xuất bản.');
+  }
+}
+if (!snapshot) throw new Error('Không có bản giá để xuất bản.');
 delete snapshot.scan;
 
 const connect = liveEndpoint ? ' ' + new URL(liveEndpoint).origin : '';

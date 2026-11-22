@@ -9,6 +9,8 @@ on:
     - cron: '30-55/5 1 * * *'
     - cron: '*/5 2-12 * * *'
     - cron: '0-30/5 13 * * *'
+    # Retry two minutes into a slot if its first run has not published.
+    - cron: '2-57/5 1-13 * * *'
 
 permissions:
   contents: read

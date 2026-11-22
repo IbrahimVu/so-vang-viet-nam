@@ -6,6 +6,9 @@ const localTime = new Intl.DateTimeFormat('vi-VN', {
 const sourceTime = new Intl.DateTimeFormat('vi-VN', {
   timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric'
 });
+const vietnamClock = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+});
 let data;
 let kind = 'all';
 let busy = false;
@@ -198,7 +201,9 @@ async function refresh(manual = false) {
     status.dataset.live = String(active > 0 && !snapshotExpired);
     if (usesSnapshot) {
       const online = manual && liveEndpoint ? next.sources.filter(source => source.status === 'ok').length : active;
-      status.textContent = (snapshotExpired ? 'Giá đã lưu · ' : online + '/' + data.sources.length + ' nguồn · ') +
+      const vietnamTime = vietnamClock.format(new Date());
+      const waiting = vietnamTime >= '08:30' && vietnamTime <= '20:30' ? 'Chờ lượt quét mới' : 'Ngoài giờ quét';
+      status.textContent = (snapshotExpired ? waiting + ' · ' : online + '/' + data.sources.length + ' nguồn · ') +
         'Lần lấy giá ' + sourceTime.format(new Date(data.checkedAt));
     } else {
       status.textContent = active + '/' + data.sources.length + ' nguồn đã đồng bộ · Kiểm tra lúc ' +
