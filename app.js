@@ -29,18 +29,28 @@ const brand = $('brand-filter');
 const prices = $('prices');
 const pills = Array.from(document.querySelectorAll('[data-kind]'));
 const brandPriority = new Map([['sjc', 0], ['doji', 1], ['btmh', 2], ['btmc', 3]]);
-const northernRegions = new Set(['Hà Nội', 'Miền Bắc']);
+const northernRegions = new Map([
+  ['Hà Nội', 0], ['Miền Bắc', 1], ['Hải Phòng', 2], ['Hạ Long', 2], ['Quảng Ninh', 2]
+]);
+
+function quoteRegionPriority(row) {
+  const north = northernRegions.get(row.region);
+  if (north != null) return north;
+  // Some brands publish one board without a regional label.
+  return row.region?.startsWith('Bảng giá ') ? 3 : 4;
+}
 
 function quoteGroup(row) {
   const preferred = brandPriority.has(row.brandId);
-  if (northernRegions.has(row.region)) return preferred ? 0 : 2;
-  return preferred ? 1 : 3;
+  if (preferred) return quoteRegionPriority(row) < 4 ? 0 : 1;
+  return northernRegions.has(row.region) ? 2 : 3;
 }
 
 function compareQuotes(a, b) {
   const groupDifference = quoteGroup(a) - quoteGroup(b);
   const priority = (brandPriority.get(a.brandId) ?? 4) - (brandPriority.get(b.brandId) ?? 4);
-  return groupDifference || priority || Number(b.reference) - Number(a.reference) || a.brand.localeCompare(b.brand, 'vi');
+  return groupDifference || priority || quoteRegionPriority(a) - quoteRegionPriority(b) ||
+    Number(b.reference) - Number(a.reference) || a.brand.localeCompare(b.brand, 'vi');
 }
 
 function visibleQuote(row) {
