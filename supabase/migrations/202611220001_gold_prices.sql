@@ -14,6 +14,7 @@ create table gold_private.scan_state (
   manual_day date,
   manual_count integer not null default 0
 );
+alter table gold_private.scan_state enable row level security;
 insert into gold_private.scan_state default values;
 
 create function public.gold_prices()
@@ -35,6 +36,7 @@ declare
   scan_token uuid := gen_random_uuid();
   target text;
   scan_secret text;
+  gateway_jwt text;
 begin
   if not manual and (local_at::time < time '08:30' or local_at::time >= time '20:31') then
     return '{"outcome":"outside_window"}'::jsonb;
@@ -54,6 +56,7 @@ begin
 
   select decrypted_secret into strict target from vault.decrypted_secrets where name = 'gold_scan_url';
   select decrypted_secret into strict scan_secret from vault.decrypted_secrets where name = 'gold_scan_secret';
+  select decrypted_secret into gateway_jwt from vault.decrypted_secrets where name = 'gold_scan_gateway_jwt';
   if target !~ '^https://[a-z0-9]{20}\.supabase\.co/functions/v1/gold-scan$'
      or target is null or scan_secret is null or length(scan_secret) < 32 then
     raise exception 'Invalid gold scanner configuration';
@@ -73,7 +76,9 @@ begin
 
   perform net.http_post(
     url := target,
-    headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || scan_secret),
+    headers := jsonb_build_object('Content-Type', 'application/json', 'X-Gold-Scan-Secret', scan_secret)
+      || case when gateway_jwt is null then '{}'::jsonb
+         else jsonb_build_object('Authorization', 'Bearer ' || gateway_jwt) end,
     body := jsonb_build_object('token', scan_token),
     timeout_milliseconds := 50000
   );

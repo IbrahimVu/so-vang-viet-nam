@@ -25,16 +25,16 @@ async function readPagesFallback() {
 }
 
 function matchingSecret(header, secret) {
-  if (!secret || header?.length !== secret.length + 7 || !header.startsWith('Bearer ')) return false;
+  if (!secret || header?.length !== secret.length) return false;
   let difference = 0;
-  for (let i = 0; i < secret.length; i++) difference |= header.charCodeAt(i + 7) ^ secret.charCodeAt(i);
+  for (let i = 0; i < secret.length; i++) difference |= header.charCodeAt(i) ^ secret.charCodeAt(i);
   return difference === 0;
 }
 
 export function createGoldScanner({ environment, collect, rpc = callRpc, fallback = readPagesFallback }) {
   return async function scan(request) {
     if (request.method !== 'POST') return new Response(null, { status: 405, headers: { Allow: 'POST' } });
-    if (!matchingSecret(request.headers.get('Authorization'), environment.GOLD_SCAN_SECRET)) {
+    if (!matchingSecret(request.headers.get('X-Gold-Scan-Secret'), environment.GOLD_SCAN_SECRET)) {
       return new Response(null, { status: 401 });
     }
     try {
