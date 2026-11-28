@@ -1,5 +1,6 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import './build.mjs';
+import { buildHistory } from './history.mjs';
 import { scanIntervalMs, scanSlot, scanWindowIsOpen } from './scan-window.mjs';
 
 const { default: worker } = await import('./dist/server/index.js');
@@ -25,6 +26,7 @@ const snapshotEndpoint = supabaseRpc ? supabaseRpc + 'gold_prices' : cloudSnapsh
 const onGitHub = process.env.GITHUB_ACTIONS === 'true';
 const isScheduled = process.env.GITHUB_EVENT_NAME === 'schedule';
 const isManual = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
+const historyRun = process.env.GOLD_HISTORY_RUN === 'true';
 const now = Date.now();
 
 async function workflowOutput(publish) {
@@ -34,7 +36,7 @@ async function workflowOutput(publish) {
 }
 
 const duringScanWindow = scanWindowIsOpen(now);
-if (isScheduled && (snapshotEndpoint || !duringScanWindow)) {
+if (isScheduled && !historyRun && (snapshotEndpoint || !duringScanWindow)) {
   console.log(snapshotEndpoint ? 'Bộ quét ngoài GitHub đang hoạt động.' : 'Ngoài khung giờ quét 08:30–20:30');
   await workflowOutput(false);
   process.exit(0);
@@ -82,13 +84,13 @@ const previous = snapshotEndpoint ? await publishedSnapshot() :
   onGitHub ? await publishedSnapshot().catch(() => null) : null;
 const lastScan = Date.parse(previous?.checkedAt);
 const currentSlot = scanSlot(now);
-if (isScheduled && lastScan >= currentSlot) {
+if (isScheduled && !historyRun && lastScan >= currentSlot) {
   console.log('Đã có dữ liệu cho phiên quét 5 phút hiện tại.');
   await workflowOutput(false);
   process.exit(0);
 }
 
-const shouldScan = !snapshotEndpoint && (!onGitHub || duringScanWindow &&
+const shouldScan = !historyRun && !snapshotEndpoint && (!onGitHub || duringScanWindow &&
   (isScheduled || isManual || !(now - lastScan < 2 * scanIntervalMs)));
 let snapshot = previous;
 if (shouldScan) {
@@ -130,10 +132,12 @@ const html = (await readFile('index.html', 'utf8'))
   .replace('Trang kiểm tra bảng giá mỗi 60 giây khi đang mở.', syncDescription);
 
 await mkdir('dist/pages', { recursive: true });
+const history = await buildHistory(now, !isScheduled || historyRun);
 await Promise.all([
   writeFile('dist/pages/index.html', html),
   writeFile('dist/pages/style.css', await readFile('style.css')),
   writeFile('dist/pages/app.js', await readFile('app.js')),
+  writeFile('dist/pages/history.json', JSON.stringify(history)),
   writeFile('dist/pages/prices.json', JSON.stringify(snapshot))
 ]);
 console.log('Nguồn đã đồng bộ:', snapshot.sources.filter(source => source.status === 'ok').length);

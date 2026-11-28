@@ -12,7 +12,7 @@
 <body>
   <header class="top"><div class="wrap top-inner">
     <a class="brand" href="/" aria-label="Sổ Vàng, trang chủ"><span class="mark" aria-hidden="true"><i></i></span>Sổ Vàng<span class="country">VIỆT NAM</span></a>
-    <nav aria-label="Điều hướng"><a href="#bang-gia">Bảng giá</a><a href="#nguon">Nguồn dữ liệu</a></nav>
+    <nav aria-label="Điều hướng"><a href="#bang-gia">Bảng giá</a><a href="#lich-su">Biểu đồ</a><a href="#nguon">Nguồn dữ liệu</a></nav>
     <span class="timezone">Giờ Việt Nam · GMT+7</span>
   </div></header>
   <main class="wrap">
@@ -57,6 +57,33 @@
         <button id="next" type="button">Trang sau</button>
       </div>
       <p class="table-note">Mua vào và bán ra được tính theo góc nhìn của cửa hàng. 1 lượng = 10 chỉ.</p>
+    </section>
+
+    <section id="lich-su" class="history" aria-labelledby="history-title">
+      <div class="section-head"><div><h2 id="history-title">Lịch sử giá vàng</h2><p>Giá mua vào và bán ra cuối ngày theo từng sản phẩm.</p></div></div>
+      <div class="history-panel">
+        <div class="history-controls">
+          <label for="history-product">Sản phẩm<select id="history-product" disabled><option>Đang tải…</option></select></label>
+          <div class="tabs" role="group" aria-label="Khoảng thời gian">
+            <button data-history-days="7" type="button" aria-pressed="true">1 tuần</button>
+            <button data-history-days="30" type="button" aria-pressed="false">1 tháng</button>
+          </div>
+        </div>
+        <p class="history-status" id="history-status" role="status">Đang tải dữ liệu lịch sử…</p>
+        <div id="history-plot" hidden>
+          <div class="history-legend"><span class="history-buy">Mua vào</span><span class="history-sell">Bán ra</span><span>Triệu đồng/lượng</span></div>
+          <canvas id="history-chart" aria-hidden="true"></canvas>
+          <details class="history-details">
+            <summary>Xem bảng dữ liệu</summary>
+            <table>
+              <caption>Dữ liệu biểu đồ theo ngày · đồng/lượng</caption>
+              <thead><tr><th scope="col">Ngày</th><th scope="col" class="num">Mua vào</th><th scope="col" class="num">Bán ra</th></tr></thead>
+              <tbody id="history-rows"></tbody>
+            </table>
+          </details>
+        </div>
+        <p class="table-note">Nguồn lịch sử <a href="https://giavang.day/lich-su-theo-thang" target="_blank" rel="noopener noreferrer">Giá Vàng Đây</a>.</p>
+      </div>
     </section>
 
     <section id="nguon" class="sources" aria-labelledby="source-title">

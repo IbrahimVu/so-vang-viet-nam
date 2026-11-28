@@ -40,7 +40,27 @@ h1 span{color:var(--gold)}
 .overview h2{font-size:.9rem;font-weight:600;color:var(--dim)}
 .overview strong{display:block;font-size:clamp(1.15rem,2.5vw,1.68rem);font-variant-numeric:tabular-nums;line-height:1.35;margin:2px 0}
 .overview small{display:block;color:var(--dim);font-size:.82rem}
-.quotes,.sources{margin-top:35px;scroll-margin-top:16px}
+.quotes,.sources,.history{margin-top:35px;scroll-margin-top:16px}
+.history-panel{border:1px solid var(--line);border-radius:13px;background:var(--surface);padding:18px}
+.history-controls{display:flex;align-items:flex-end;flex-wrap:wrap;gap:12px}
+.history-controls label{display:grid;gap:4px;flex:1 1 270px;min-width:0;font-size:.88rem;font-weight:600}
+.history-controls select{width:100%;min-height:44px}
+.history-controls .tabs{margin:0}
+.history-controls button{min-height:44px}
+.history-status{color:var(--dim);font-size:.9rem;margin-top:12px}
+.history-legend{display:flex;flex-wrap:wrap;gap:6px 16px;color:var(--dim);font-size:.82rem;margin-top:10px}
+.history-legend span:before{display:inline-block;width:16px;vertical-align:middle;margin-right:6px;border-top:2px solid;content:''}
+.history-legend span:last-child:before{display:none}
+.history-buy{color:#196348}
+.history-sell{color:#925613}
+.history-legend .history-sell:before{border-top-style:dashed}
+#history-chart{display:block;width:100%;height:clamp(200px,36vw,340px);margin-top:8px}
+.history-details{margin-top:8px}
+.history-details summary{cursor:pointer;color:var(--green);padding-block:8px}
+.history-details table{min-width:0}
+.history-details caption{text-align:left;color:var(--dim);font-size:.82rem}
+.history-details th,.history-details td{padding:8px 5px}
+.history-panel a{text-decoration:underline;text-underline-offset:2px}
 .section-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:15px}
 .section-head h2{font:600 clamp(1.45rem,4vw,2rem) var(--serif);letter-spacing:-.025em}
 .section-head p{color:var(--dim);margin-top:4px;font-size:.94rem}
@@ -95,6 +115,9 @@ footer div{min-height:60px;display:flex;justify-content:space-between;align-item
   nav{gap:12px}
   nav a,.sources a,footer a{display:flex;align-items:center}
   nav a{font-size:.86rem}
+  nav{flex-wrap:wrap;gap:0 8px;justify-content:flex-end}
+  .history{scroll-margin-top:66px}
+  .history-panel{padding:12px}
   .hero{margin-top:12px;min-height:0;border-radius:15px}
   .hero-body{padding:20px}
   .ornament{right:-95px;opacity:.2}

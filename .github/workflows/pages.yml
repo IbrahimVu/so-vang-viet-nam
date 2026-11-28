@@ -11,6 +11,8 @@ on:
     - cron: '0-30/5 13 * * *'
     # Retry two minutes into a slot if its first run has not published.
     - cron: '2-57/5 1-13 * * *'
+    # Refresh the closing-price archive at 08:17 Vietnam time.
+    - cron: '17 1 * * *'
 
 permissions:
   contents: read
@@ -21,7 +23,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.ref == 'refs/heads/main' && (github.event_name != 'schedule' || (vars.PRICE_SNAPSHOT_URL == '' && vars.GOLD_SUPABASE_REF == ''))
+    if: github.ref == 'refs/heads/main' && (github.event_name != 'schedule' || github.event.schedule == '17 1 * * *' || (vars.PRICE_SNAPSHOT_URL == '' && vars.GOLD_SUPABASE_REF == ''))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -36,6 +38,7 @@ jobs:
       - id: scan
         run: node build-pages.mjs
         env:
+          GOLD_HISTORY_RUN: ${{ github.event.schedule == '17 1 * * *' }}
           PRICE_SNAPSHOT_URL: ${{ vars.PRICE_SNAPSHOT_URL }}
           GOLD_SUPABASE_REF: ${{ vars.GOLD_SUPABASE_REF }}
           GOLD_SUPABASE_PUBLISHABLE_KEY: ${{ vars.GOLD_SUPABASE_PUBLISHABLE_KEY }}

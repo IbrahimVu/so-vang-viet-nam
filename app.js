@@ -318,3 +318,151 @@ $('refresh').addEventListener('click', () => refresh(true));
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 setInterval(() => { if (!document.hidden) refresh(); }, 60_000);
 refresh();
+
+const historyProduct = $('history-product');
+const historyChart = $('history-chart');
+const historyPlot = $('history-plot');
+const historyButtons = Array.from(document.querySelectorAll('[data-history-days]'));
+const historyBrands = new Map([
+  ['sjc', 'SJC'], ['doji', 'DOJI'], ['btmh', 'Bảo Tín Mạnh Hải'], ['btmc', 'Bảo Tín Minh Châu'],
+  ['pnj', 'PNJ'], ['phuquy', 'Phú Quý'], ['mihong', 'Mi Hồng'], ['ngoctham', 'Ngọc Thẩm']
+]);
+const historyProducts = new Map();
+const chartAxis = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 1 });
+const calendarDay = 86_400_000;
+const shortDate = date => date.slice(8, 10) + '/' + date.slice(5, 7);
+let historyEnd;
+let historyDays = 7;
+let chartPoints = [];
+
+function drawHistory() {
+  if (historyPlot.hidden) return;
+  const width = historyChart.clientWidth;
+  const height = historyChart.clientHeight;
+  const context = historyChart.getContext('2d');
+  if (!context || width < 90 || !height) return;
+  const scale = Math.min(window.devicePixelRatio || 1, 2);
+  historyChart.width = Math.round(width * scale);
+  historyChart.height = Math.round(height * scale);
+  context.scale(scale, scale);
+
+  const prices = chartPoints.flatMap(point => point.slice(1).filter(Number.isFinite));
+  const floor = Math.floor(Math.min(...prices) * 10 - 1) / 10;
+  const ceiling = Math.ceil(Math.max(...prices) * 10 + 1) / 10;
+  const left = 42;
+  const right = width - 14;
+  const top = 13;
+  const bottom = height - 29;
+  const x = index => left + index * (right - left) / (chartPoints.length - 1);
+  const y = value => bottom - (value - floor) * (bottom - top) / (ceiling - floor);
+  context.font = '12px system-ui';
+  context.textBaseline = 'middle';
+  context.fillStyle = '#52645e';
+  context.strokeStyle = '#dfe7e1';
+  context.textAlign = 'right';
+  for (let i = 0; i <= 4; i++) {
+    const value = floor + i * (ceiling - floor) / 4;
+    const line = y(value);
+    context.beginPath();
+    context.moveTo(left, line);
+    context.lineTo(right, line);
+    context.stroke();
+    context.fillText(chartAxis.format(value), left - 6, line);
+  }
+  for (const index of [0, Math.floor(chartPoints.length / 2), chartPoints.length - 1]) {
+    context.textAlign = index === 0 ? 'left' : index === chartPoints.length - 1 ? 'right' : 'center';
+    context.fillText(shortDate(chartPoints[index][0]), x(index), bottom + 16);
+  }
+  for (const [column, color, dash] of [[1, '#196348', []], [2, '#925613', [5, 4]]]) {
+    context.strokeStyle = color;
+    context.fillStyle = color;
+    context.lineWidth = 2;
+    context.setLineDash(dash);
+    let previous = null;
+    chartPoints.forEach((point, i) => {
+      const value = point[column];
+      if (Number.isFinite(previous) && Number.isFinite(value)) {
+        context.beginPath();
+        context.moveTo(x(i - 1), y(previous));
+        context.lineTo(x(i), y(value));
+        context.stroke();
+      }
+      if (Number.isFinite(value)) {
+        context.beginPath();
+        context.arc(x(i), y(value), 2.6, 0, Math.PI * 2);
+        context.fill();
+      }
+      previous = value;
+    });
+  }
+}
+
+function renderHistory() {
+  const product = historyProducts.get(historyProduct.value);
+  if (!product) return;
+  chartPoints = Array.from({ length: historyDays }, (_, i) => {
+    const date = new Date(historyEnd - (historyDays - 1 - i) * calendarDay).toISOString().slice(0, 10);
+    const [buy, sell] = product.quotes.get(date) ?? [];
+    return [date, buy == null ? null : buy / 100_000, sell == null ? null : sell / 100_000];
+  });
+  const recorded = chartPoints.filter(point => point[1] != null || point[2] != null);
+  historyPlot.hidden = !recorded.length;
+  const period = shortDate(chartPoints[0][0]) + '–' + shortDate(chartPoints.at(-1)[0]);
+  $('history-status').textContent = recorded.length + '/' + historyDays + ' ngày có dữ liệu · ' + period;
+  $('history-rows').replaceChildren(...recorded.reverse().map(([date]) => {
+    const [buy, sell] = product.quotes.get(date);
+    const row = make('tr');
+    const value = price => price == null ? '—' : format.format(price * 10);
+    row.append(make('td', shortDate(date) + '/' + date.slice(0, 4)),
+      make('td', value(buy), 'num'), make('td', value(sell), 'num'));
+    return row;
+  }));
+  drawHistory();
+}
+
+async function loadHistory() {
+  try {
+    const response = await fetch('./history.json', { signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) throw new Error('History request failed');
+    const archive = await response.json();
+    historyEnd = Date.parse(archive.end + 'T00:00:00Z');
+    if (archive.version !== 1 || !Number.isFinite(historyEnd)) throw new Error('Invalid history');
+    for (const [date, rows] of Object.entries(archive.days)) {
+      for (const [brand, code, name, region, buy, sell] of rows) {
+        if (!historyBrands.has(brand) || !visibleQuote({ name }) || /^\d+$/.test(name)) continue;
+        const key = JSON.stringify([brand, code, region]);
+        if (!historyProducts.has(key)) {
+          historyProducts.set(key, { brand, label: name + (region ? ' · ' + region : ''), quotes: new Map() });
+        }
+        historyProducts.get(key).quotes.set(date, [buy, sell]);
+      }
+    }
+    if (!historyProducts.size) throw new Error('History archive empty');
+    historyProduct.replaceChildren();
+    for (const [brand, label] of historyBrands) {
+      const items = [...historyProducts].filter(([, product]) => product.brand === brand);
+      if (!items.length) continue;
+      const group = make('optgroup');
+      group.label = label;
+      group.append(...items.map(([key, product]) => new Option(product.label, key)));
+      historyProduct.append(group);
+    }
+    historyProduct.disabled = false;
+    renderHistory();
+  } catch {
+    $('history-status').textContent = 'Chưa tải được dữ liệu lịch sử. Hãy thử lại sau.';
+    historyProduct.replaceChildren(new Option('Chưa có dữ liệu'));
+    historyProduct.disabled = true;
+  }
+}
+
+if (historyProduct) {
+  historyProduct.addEventListener('change', renderHistory);
+  historyButtons.forEach(button => button.addEventListener('click', () => {
+    historyDays = Number(button.dataset.historyDays);
+    historyButtons.forEach(option => option.setAttribute('aria-pressed', String(option === button)));
+    renderHistory();
+  }));
+  new ResizeObserver(drawHistory).observe(historyChart);
+  loadHistory();
+}
