@@ -428,8 +428,9 @@ async function loadHistory() {
     historyEnd = Date.parse(archive.end + 'T00:00:00Z');
     if (archive.version !== 1 || !Number.isFinite(historyEnd)) throw new Error('Invalid history');
     for (const [date, rows] of Object.entries(archive.days)) {
-      for (const [brand, code, name, region, buy, sell] of rows) {
+      for (const [brand, code, name, area, buy, sell] of rows) {
         if (!historyBrands.has(brand) || !visibleQuote({ name }) || /^\d+$/.test(name)) continue;
+        const region = /^giá vàng\b/i.test(area) ? '' : area;
         const key = JSON.stringify([brand, code, region]);
         if (!historyProducts.has(key)) {
           historyProducts.set(key, { brand, label: name + (region ? ' · ' + region : ''), quotes: new Map() });
